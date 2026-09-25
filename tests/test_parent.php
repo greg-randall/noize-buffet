@@ -26,6 +26,10 @@ check(str_contains($tools, 'Bash(php bin/nb.php *)') && str_contains($tools, 'Ba
 check(str_contains($a[array_search('-p', $a, true) + 1], 'CLAUDE.md'), 'new-session prompt mentions CLAUDE.md');
 check(str_contains($a[array_search('-p', $a, true) + 1], 'hi there'), 'prompt carries the user message');
 check(in_array("NB_JOB_ID=$id", $a, true), 'NB_JOB_ID passed');
+check(in_array('--disable-slash-commands', $a, true), 'skills and commands disabled');
+$settings = json_decode($a[array_search('--settings', $a, true) + 1] ?? '', true);
+check(is_array($settings) && $settings['disableAllHooks'] === true && $settings['autoMemoryEnabled'] === false, 'isolation settings passed');
+check(!in_array(realpath(nb_root()) . '/CLAUDE.md', $settings['claudeMdExcludes'], true), "the repo's own CLAUDE.md is not excluded");
 $last = nb_chat_since($pdo, 0);
 check(end($last)['role'] === 'parent' && end($last)['text'] === 'hello from fake', 'reply in chat');
 check(nb_setting($pdo, 'parent_session_id') === 'sess-123' && nb_setting($pdo, 'parent_turns') === '1', 'session saved, turns 1');

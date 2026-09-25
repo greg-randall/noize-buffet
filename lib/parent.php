@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/isolation.php';
 
 // Tools the parent may use without asking. Bash is limited to the two helper scripts.
 const NB_PARENT_TOOLS = 'Read Edit Write WebSearch WebFetch Bash(php bin/nb.php *) Bash(python3 scripts/yt_search.py *)';
@@ -26,6 +27,9 @@ function nb_parent_command(string $prompt, ?string $sessionId, array $config): a
         '--output-format', 'json',
         '--permission-mode', 'acceptEdits',
         '--allowedTools', NB_PARENT_TOOLS,
+        // See only this repo's CLAUDE.md: skip the user's own instructions, hooks, auto memory, skills.
+        '--settings', json_encode(nb_isolation_settings(nb_root()), JSON_UNESCAPED_SLASHES),
+        '--disable-slash-commands',
     ];
     if ($sessionId !== null) {
         $cmd[] = '--resume';
