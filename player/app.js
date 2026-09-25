@@ -25,6 +25,21 @@ const state = {
 const cur = () => state.songs[state.i];
 const notesDirty = () => !!cur() && $('#notes').val() !== (cur().notes || '');
 
+// Noisy on purpose: every interesting event goes to the browser console with an [nb] prefix.
+const log = (...args) => console.log('[nb]', ...args);
+const YT_STATES = {'-1': 'unstarted', 0: 'ended', 1: 'playing', 2: 'paused', 3: 'buffering', 5: 'cued'};
+window.nb = state; // type `nb` in the console to inspect the current state
+
+function connError(what, xhr) {
+  const msg = (xhr.responseJSON && xhr.responseJSON.error) || (xhr.status ? 'HTTP ' + xhr.status : "can't reach server");
+  console.error('[nb]', what, 'failed:', xhr.status, xhr.responseText);
+  $('#conn-status').removeClass('d-none').text(`${what} failed: ${msg}`);
+}
+
+function connOk() {
+  $('#conn-status').addClass('d-none');
+}
+
 function setStatus(text, cls) {
   $('#save-status').text(text).attr('class', 'badge ms-auto ' + cls);
 }
@@ -40,15 +55,19 @@ function save(extra) {
   if (!cur()) return $.Deferred().resolve().promise();
   const idx = state.i;
   state.lastSaveAt = Date.now();
+  const body = payload(extra);
+  log('save →', body);
   return $.ajax({
     url: 'api.php?action=save', method: 'POST', contentType: 'application/json',
-    data: JSON.stringify(payload(extra)), dataType: 'json',
+    data: JSON.stringify(body), dataType: 'json',
   }).done(res => {
+    log('save ✓', res.row);
     Object.assign(state.songs[idx], res.row);
     renderRow(idx);
     setStatus('saved ' + new Date().toLocaleTimeString(), 'text-bg-success');
   }).fail(xhr => {
     const msg = (xhr.responseJSON && xhr.responseJSON.error) || xhr.status || 'network';
+    console.error('[nb] save failed:', xhr.status, xhr.responseText, body);
     setStatus('save failed: ' + msg, 'text-bg-warning');
   });
 }
@@ -78,6 +97,8 @@ function renderQueue() {
 
 function refreshQueue(initial) {
   return $.getJSON('api.php', {action: 'queue'}).done(songs => {
+    connOk();
+    log('queue loaded:', songs.length, 'songs', {initial});
     const currentId = cur() ? cur().video_id : null;
     state.songs = songs;
     renderQueue();
@@ -89,7 +110,7 @@ function refreshQueue(initial) {
       renderRow(state.i);
       $('#position').text(`Song ${state.i + 1} of ${songs.length}`);
     }
-  });
+  }).fail(xhr => connError('loading the queue', xhr));
 }
 
 // ---------- player ----------
@@ -100,7 +121,8 @@ function showProgress() {
 }
 
 function cueOrLoad(id, autoplay) {
-  if (!state.ready) { state.pendingVideo = {id, autoplay}; return; }
+  if (!state.ready) { log('player not ready yet; queued', id); state.pendingVideo = {id, autoplay}; return; }
+  log(autoplay ? 'load+play' : 'cue', id);
   if (autoplay) state.player.loadVideoById(id); else state.player.cueVideoById(id);
 }
 
@@ -113,6 +135,7 @@ function loadSong(idx, autoplay, byUser) {
   state.played = false;
   state.furthest = s.furthest_pct || 0;
   state.duration = s.duration_s || null;
+  log(`song ${idx + 1}/${state.songs.length}:`, s.video_id, s.artist, '-', s.title, {autoplay, byUser, furthest: state.furthest});
   $('#song-title').text(s.title);
   $('#song-artist').text(s.artist);
   $('#song-meta').text([s.bucket, s.source].filter(Boolean).join(' · '));
@@ -135,9 +158,14 @@ function saveOnLeave(movingForward) {
   clearTimeout(state.notesTimer);
   if (state.played) {
     const ended = state.ready && state.player.getPlayerState() === YT.PlayerState.ENDED;
-    save((movingForward && !ended && state.furthest < 100) ? {skipped: 1} : {});
+    const skipped = movingForward && !ended && state.furthest < 100;
+    log('leaving played song', cur().video_id, skipped ? '→ marked skipped' : '→ saved', {furthest: state.furthest, ended});
+    save(skipped ? {skipped: 1} : {});
   } else if (notesDirty()) {
+    log('leaving unplayed song with a pending note → saving the note only', cur().video_id);
     save();
+  } else {
+    log('leaving unplayed song → not recorded', cur().video_id);
   }
 }
 
@@ -160,18 +188,22 @@ function poll() {
 }
 
 function onStateChange(e) {
+  log('player state:', YT_STATES[e.data] || e.data, cur() ? cur().video_id : '');
   if (e.data === YT.PlayerState.PLAYING) state.played = true;
   if (e.data === YT.PlayerState.PAUSED) save();
   if (e.data === YT.PlayerState.ENDED) {
     state.furthest = 100;
     showProgress();
     const advance = state.interacted && state.i < state.songs.length - 1;
+    log('song ended →', advance ? 'auto-advancing' : 'stopping',
+      {interacted: state.interacted, lastSong: state.i >= state.songs.length - 1});
     save({finished: 1}).always(() => { if (advance) loadSong(state.i + 1, true, false); });
   }
 }
 
 function onError(e) {
   const why = YT_ERRORS[e.data] || 'unknown';
+  console.error('[nb] YouTube error', e.data, why, cur() ? cur().video_id : '');
   $('#unavailable').removeClass('d-none').text(`Unavailable (error ${e.data}: ${why}). Use Next to move on.`);
   save({error: String(e.data)});
 }
@@ -203,18 +235,23 @@ function appendChat(m) {
 
 function pollChat() {
   $.getJSON('api.php', {action: 'chat', after: state.lastChatId}).done(res => {
-    res.messages.forEach(m => { appendChat(m); state.lastChatId = Number(m.id); });
+    connOk();
+    res.messages.forEach(m => { log(`chat [${m.role}]`, m.text); appendChat(m); state.lastChatId = Number(m.id); });
     const busy = !!res.jobs.running || res.jobs.queued > 0;
+    if (busy !== state.agentBusy) log('agent', busy ? 'busy' : 'idle', res.jobs);
     $('#agent-status').toggleClass('d-none', !busy).text(res.jobs.running ? 'agent working…' : 'waiting for the agent…');
     if (state.agentBusy && !busy) refreshQueue(false);
     state.agentBusy = busy;
-  });
+  }).fail(xhr => connError('chat', xhr));
 }
 
 // ---------- wiring ----------
 
 $(function () {
-  $.ajax({url: 'api.php?action=start', method: 'POST', contentType: 'application/json', data: '{}'});
+  log('page loaded; state is window.nb');
+  $.ajax({url: 'api.php?action=start', method: 'POST', contentType: 'application/json', data: '{}'})
+    .done(res => log(res.started ? 'first run: interview queued' : 'existing install'))
+    .fail(xhr => connError('starting up', xhr));
   refreshQueue(true);
   pollChat();
   setInterval(pollChat, CHAT_POLL_MS);
@@ -225,18 +262,21 @@ $(function () {
     state.interacted = true;
     $('#rating-group button').removeClass('active');
     $(this).addClass('active');
+    log('rated', $(this).data('rating'));
     save({rating: $(this).data('rating')});
   });
 
   $('#off-brief').on('change', function () {
     if (!cur()) return;
     state.interacted = true;
+    log('off-brief', this.checked);
     save({off_brief: this.checked});
   });
 
   $('input[name="newtome"]').on('change', function () {
     if (!cur()) return;
     state.interacted = true;
+    log('new to me', this.value === '' ? 'unset' : this.value === '1');
     save({new_to_me: this.value === '' ? null : this.value === '1'});
   });
 
@@ -247,8 +287,8 @@ $(function () {
     state.notesTimer = setTimeout(() => save(), NOTES_DEBOUNCE_MS);
   });
 
-  $('#btn-next').on('click', () => leaveAndGo(state.i + 1));
-  $('#btn-back').on('click', () => leaveAndGo(state.i - 1));
+  $('#btn-next').on('click', () => { log('clicked Next'); leaveAndGo(state.i + 1); });
+  $('#btn-back').on('click', () => { log('clicked Back'); leaveAndGo(state.i - 1); });
   $('#queue-list').on('click', 'tr', function () { leaveAndGo(parseInt($(this).data('idx'), 10)); });
 
   $('#chat-form').on('submit', function (e) {
@@ -256,6 +296,7 @@ $(function () {
     const text = $('#chat-input').val().trim();
     if (!text) return;
     $('#chat-input').val('');
+    log('sending chat:', text);
     $.ajax({url: 'api.php?action=send', method: 'POST', contentType: 'application/json', data: JSON.stringify({message: text})})
       .done(() => pollChat())
       .fail(xhr => appendChat({role: 'system', text: 'Could not send: ' + ((xhr.responseJSON && xhr.responseJSON.error) || xhr.status)}));

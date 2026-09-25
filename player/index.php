@@ -19,6 +19,7 @@
     <span class="navbar-brand">noize-buffet</span>
     <span id="position" class="text-secondary"></span>
     <span id="agent-status" class="badge text-bg-info d-none">agent working…</span>
+    <span id="conn-status" class="badge text-bg-danger d-none"></span>
     <span id="save-status" class="badge text-bg-secondary ms-auto">idle</span>
   </div>
 </nav>
