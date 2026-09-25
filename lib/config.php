@@ -7,6 +7,7 @@ const NB_CONFIG_DEFAULTS = [
     'parent_model' => 'sonnet',
     'session_rotate_turns' => 40,
     'job_timeout_s' => 600, // give up on a job (and restart the agent process) after this long
+    'memory_picks' => 2, // most songs per batch the agent may pick from its own memory rather than research
 ];
 
 /** Defaults overlaid with config.json (if present). */
