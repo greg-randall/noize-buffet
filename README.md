@@ -35,3 +35,7 @@ It checks the requirements, creates `.env` if needed, starts the web server and 
 - `data/nb.log`: every database command the agent ran, with its exact input and output (one JSON object per line).
 - `data/parent-stderr.log`: anything `claude` printed to stderr.
 - `data/api-errors.log`: server-side errors from the web UI, with stack traces.
+
+## License
+
+[PolyForm Noncommercial 1.0.0](LICENSE): free for personal and other noncommercial use. For commercial use, contact me about a separate license.
