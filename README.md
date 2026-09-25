@@ -9,7 +9,7 @@ You chat with an AI agent in a local web page. It asks what you're after, then k
 - [Claude Code](https://claude.com/claude-code), logged in with your own account (it runs the agent)
 - PHP 8.1+ with `pdo_sqlite`
 - Python 3 and [yt-dlp](https://github.com/yt-dlp/yt-dlp)
-- Optional but recommended: a TypeSafe API key in `.env` (used by comment mining, coming in a later stage)
+- Optional but recommended: a TypeSafe API key in `.env` (copy `.env.example` to `.env`; `/music-setup` does this for you). Used by comment mining, coming in a later stage
 
 ## Start
 

@@ -10,7 +10,7 @@ Check the requirements for noize-buffet and report each as OK or MISSING, with h
 4. `claude --version` (you are running inside it, so it's installed; remind the user they must be logged in)
 5. A TypeSafe key in `.env` as `TYPESAFE_API=...` (or `TYPESAFE_API_KEY=...`). **If it's missing, warn loudly**: comment mining (coming in a later stage) will fall back to a simple keyword filter, which is noisier, reads fewer comments and uses more of the user's Claude allowance. A normal month of use costs well under $5 on TypeSafe; tell them to check typesafe.ai for current free credits. Never print the key.
 
-Create the `data/` folder if it doesn't exist.
+Create the `data/` folder if it doesn't exist. If `.env` doesn't exist, create it by copying `.env.example` (never overwrite an existing `.env`), then remind the user to paste their TypeSafe key into it.
 
 Then tell the user to open **two terminals** in this folder and run:
 
