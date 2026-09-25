@@ -226,12 +226,18 @@ window.onYouTubeIframeAPIReady = function () {
 
 function appendChat(m) {
   const label = {user: 'you', parent: 'agent', system: 'system'}[m.role] || m.role;
-  const cls = m.role === 'system' ? 'text-warning' : (m.role === 'user' ? 'text-info' : 'text-secondary');
+  // Chat-style bubbles: you on the right in blue, the agent on the left in grey, system notes in amber.
+  const bubble = {
+    user: 'ms-auto bg-primary-subtle border-primary-subtle',
+    parent: 'me-auto bg-body-tertiary',
+    system: 'mx-auto bg-warning-subtle border-warning-subtle',
+  }[m.role] || 'bg-body-tertiary';
   // Agent replies are Markdown, rendered and sanitised; user and system messages stay plain text.
   const $body = m.role === 'parent' && window.marked && window.DOMPurify
     ? $('<div class="chat-md">').html(DOMPurify.sanitize(marked.parse(m.text)))
     : $('<div class="chat-text">').text(m.text);
-  $('#chat-log').append($('<div class="mb-2">').append($('<div class="small">').addClass(cls).text(label), $body));
+  $('#chat-log').append($('<div class="chat-bubble border rounded-3 px-2 py-1 mb-2">').addClass(bubble).append(
+    $('<div class="small text-body-secondary">').text(label), $body));
   const log = document.getElementById('chat-log');
   log.scrollTop = log.scrollHeight;
 }

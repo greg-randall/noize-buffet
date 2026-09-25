@@ -11,6 +11,8 @@
     #queue-list tr { cursor: pointer; }
     #chat-log { height: 55vh; overflow-y: auto; }
     .chat-text { white-space: pre-wrap; }
+    .chat-bubble { max-width: 90%; width: fit-content; }
+    #chat-log { display: flex; flex-direction: column; }
     .chat-md { white-space: normal; }
     .chat-md p, .chat-md ul, .chat-md ol { margin-bottom: .4rem; }
   </style>
