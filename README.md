@@ -31,3 +31,11 @@ Open http://localhost:8000.
 ## Tests
 
     bash tests/run.sh
+
+## When something goes wrong
+
+- **Worker terminal**: one line per job with status, time, turns and API-equivalent cost; `BLOCKED:` lines if the agent tried a tool it isn't allowed; the path to the job's debug file.
+- `data/jobs/<id>.json`: everything about one agent job: prompt, command, exit code, duration, blocked tools, raw output, and the path to Claude Code's full transcript of the conversation.
+- `data/nb.log`: every database command the agent ran, with its exact input and output (one JSON object per line).
+- `data/parent-stderr.log`: anything `claude` printed to stderr.
+- `data/api-errors.log`: server-side errors from the web UI, with stack traces.
