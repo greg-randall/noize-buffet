@@ -65,6 +65,21 @@ $running = nb_job_next($pdo);
 $said = nb_chat_since(nb_db(), 0);
 check($code === 0 && (int)end($said)['job_id'] === (int)$running['id'], 'say without NB_JOB_ID uses the running job');
 
+[$code, $r] = nb_cli($cli, ['set', 'AAAAAAAAAAA', 'rating=top', 'new_to_me=1', 'off_brief=1']);
+$l = nb_listen(nb_db(), 'AAAAAAAAAAA');
+check($code === 0 && $l['rating'] === 'top' && (int)$l['new_to_me'] === 1 && (int)$l['off_brief'] === 1, 'set rating and toggles');
+[$code, $r] = nb_cli($cli, ['set', 'AAAAAAAAAAA', 'new_to_me=unknown', 'off_brief=0']);
+$l = nb_listen(nb_db(), 'AAAAAAAAAAA');
+check($code === 0 && $l['rating'] === 'top' && $l['new_to_me'] === null && (int)$l['off_brief'] === 0, 'set only the given fields');
+[$code, $r] = nb_cli($cli, ['set', 'AAAAAAAAAAA', 'rating=amazing']);
+check($code === 2 && $r['ok'] === false && nb_listen(nb_db(), 'AAAAAAAAAAA')['rating'] === 'top', 'bad rating rejected, nothing changed');
+[$code, $r] = nb_cli($cli, ['set', 'AAAAAAAAAAA', 'volume=11']);
+check($code === 2 && str_contains($r['error'], 'volume=11'), 'unknown field rejected');
+[$code, $r] = nb_cli($cli, ['set', 'AAAAAAAAAAA']);
+check($code === 2 && $r['ok'] === false, 'set with nothing to set rejected');
+[$code, $r] = nb_cli($cli, ['set', 'ZZZZZZZZZZZ', 'rating=yes']);
+check($code === 2 && $r['ok'] === false, 'set on unknown song rejected');
+
 [$code, $r] = nb_cli($cli, ['note', 'AAAAAAAAAAA', 'love', 'the', 'drums']);
 check($code === 0 && str_ends_with($r['notes'], 'love the drums'), 'note appends to the song');
 [$code, $r] = nb_cli($cli, ['note', 'ZZZZZZZZZZZ', 'x']);

@@ -140,10 +140,7 @@ function loadSong(idx, autoplay, byUser) {
   $('#song-reason').text(s.reason || '');
   renderSongNotes();
   $('#chat-input').attr('placeholder', `What do you think of "${s.title}"? Or ask for anything…`);
-  $('#rating-group button').removeClass('active').filter(`[data-rating="${s.rating}"]`).addClass('active');
-  $('#off-brief').prop('checked', Number(s.off_brief) === 1);
-  const ntm = s.new_to_me === null || s.new_to_me === undefined ? '' : String(s.new_to_me);
-  $(`input[name="newtome"][value="${ntm}"]`).prop('checked', true);
+  renderSongControls();
   $('#unavailable').addClass('d-none');
   $('#position').text(`Song ${idx + 1} of ${state.songs.length}`);
   $('#queue-list tr').removeClass('table-active');
@@ -155,6 +152,16 @@ function loadSong(idx, autoplay, byUser) {
 function renderSongNotes() {
   const s = cur();
   $('#song-notes').text(s && s.notes ? s.notes : 'none yet');
+}
+
+// Rating buttons and toggles for the current song. Also called after the agent replies, since it may have set them.
+function renderSongControls() {
+  const s = cur();
+  if (!s) return;
+  $('#rating-group button').removeClass('active').filter(`[data-rating="${s.rating}"]`).addClass('active');
+  $('#off-brief').prop('checked', Number(s.off_brief) === 1);
+  const ntm = s.new_to_me === null || s.new_to_me === undefined ? '' : String(s.new_to_me);
+  $(`input[name="newtome"][value="${ntm}"]`).prop('checked', true);
 }
 
 // The current song, sent with each chat message so the agent knows what you're listening to.
@@ -261,7 +268,8 @@ function pollChat() {
     state.jobs = res.jobs;
     const busy = !!res.jobs.running || res.jobs.queued > 0;
     if (busy !== state.agentBusy) log('agent', busy ? 'busy' : 'idle', res.jobs);
-    if (state.agentBusy && !busy) refreshQueue(false).done(renderSongNotes); // picks up new songs and notes the agent recorded
+    // Picks up new songs, and notes, ratings and toggles the agent recorded.
+    if (state.agentBusy && !busy) refreshQueue(false).done(() => { renderSongNotes(); renderSongControls(); });
     state.agentBusy = busy;
     renderAgentStatus();
     setTimeout(pollChat, 0);

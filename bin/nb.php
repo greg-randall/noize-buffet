@@ -15,6 +15,8 @@ const NB_USAGE = [
     'mutes' => 'list mutes',
     'status' => 'counts and job status',
     'note <video_id> <text>' => "append the user's comment to that song's notes",
+    'set <video_id> [rating=top|yes|good|ok|meh|no] [new_to_me=1|0|unknown] [off_brief=1|0]' =>
+        "set a song's rating and toggles from what the user said about it",
     'say <text>' => 'post a short message to the user right now, while you keep working (e.g. before a long batch)',
 ];
 
@@ -77,6 +79,29 @@ try {
         case 'note':
             $row = nb_append_note($pdo, $argv[2] ?? '', implode(' ', array_slice($argv, 3)));
             out(['ok' => true, 'video_id' => $row['video_id'], 'notes' => $row['notes']]);
+
+        case 'set':
+            $vid = $argv[2] ?? '';
+            $fields = ['video_id' => $vid];
+            foreach (array_slice($argv, 3) as $pair) {
+                [$key, $value] = array_pad(explode('=', $pair, 2), 2, null);
+                if ($key === 'rating' && $value !== null && $value !== '') {
+                    $fields['rating'] = $value; // nb_save_listen checks it's a real rating
+                } elseif ($key === 'new_to_me' && in_array($value, ['1', '0', 'unknown'], true)) {
+                    $fields['new_to_me'] = $value === 'unknown' ? null : $value === '1';
+                } elseif ($key === 'off_brief' && in_array($value, ['1', '0'], true)) {
+                    $fields['off_brief'] = $value === '1';
+                } else {
+                    out(['ok' => false, 'error' => "can't set '$pair'; use rating=<" . implode('|', NB_RATINGS)
+                        . '>, new_to_me=1|0|unknown or off_brief=1|0'], 2);
+                }
+            }
+            if (count($fields) === 1) {
+                out(['ok' => false, 'error' => 'nothing to set; e.g. set <video_id> rating=yes new_to_me=1'], 2);
+            }
+            $row = nb_save_listen($pdo, $fields);
+            out(['ok' => true, 'video_id' => $vid, 'rating' => $row['rating'], 'new_to_me' => $row['new_to_me'],
+                'off_brief' => $row['off_brief']]);
 
         case 'say':
             $text = trim(implode(' ', array_slice($argv, 2)));
