@@ -60,5 +60,30 @@ check($job['status'] === 'failed' && str_contains((string)$job['error'], 'boom')
 $msgs = nb_chat_since($pdo, 0);
 check(end($msgs)['role'] === 'system' && str_contains(end($msgs)['text'], 'boom'), 'system message in chat');
 check(nb_setting($pdo, 'parent_session_id') === null, 'session cleared after failure');
+$dbg = json_decode((string)file_get_contents(tmp_dir() . "/jobs/$fid.json"), true);
+check(is_array($dbg) && $dbg['ok'] === false && str_contains($dbg['raw_output'], 'boom'), 'failed job debug file has raw output');
+check(str_contains(end($msgs)['text'], "jobs/$fid.json"), 'error message points at the debug file');
+
+echo "debug output\n";
+$okId = nb_job_enqueue($pdo, 'chat', ['message' => 'debug me']);
+$s = nb_run_parent_job($pdo, nb_job_next($pdo), $config);
+$dbg = json_decode((string)file_get_contents(tmp_dir() . "/jobs/$okId.json"), true);
+check($s['ok'] === true && $s['turns'] === 2 && $s['cost_usd'] === 0.005 && $s['denials'] === [], 'summary has turns and cost');
+check($dbg['prompt'] !== '' && str_contains($dbg['prompt'], 'debug me') && $dbg['exit_code'] === 0, 'debug file has prompt and exit code');
+check(in_array('--allowedTools', $dbg['command'], true) && is_numeric($dbg['duration_s']), 'debug file has command and duration');
+check(array_key_exists('transcript', $dbg), 'debug file has transcript field');
+
+echo "permission denials\n";
+putenv('NB_FAKE_DENY=1');
+$dId = nb_job_enqueue($pdo, 'chat', ['message' => 'do something sneaky']);
+$s = nb_run_parent_job($pdo, nb_job_next($pdo), $config);
+putenv('NB_FAKE_DENY');
+check($s['denials'] === ['Bash: ls /'], 'denial summarised');
+$sys = array_values(array_filter(nb_chat_since($pdo, 0), fn($m) => $m['role'] === 'system' && (int)$m['job_id'] === $dId));
+check(count($sys) === 1 && str_contains($sys[0]['text'], 'Bash: ls /'), 'denial posted to chat');
+check($pdo->query("SELECT status FROM jobs WHERE id = $dId")->fetchColumn() === 'done', 'job with denials still completes');
+
+echo "transcript path\n";
+check(nb_transcript_path(null) === null && nb_transcript_path('no-such-session') === null, 'missing transcript gives null');
 
 finish();

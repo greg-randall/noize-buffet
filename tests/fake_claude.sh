@@ -7,4 +7,8 @@ if [ -n "$NB_FAKE_FAIL" ]; then
     echo '{"type":"result","is_error":true,"result":"boom","session_id":"sess-err"}'
     exit 1
 fi
-echo '{"type":"result","is_error":false,"result":"hello from fake","session_id":"sess-123"}'
+if [ -n "$NB_FAKE_DENY" ]; then
+    echo '{"type":"result","is_error":false,"result":"tried something","session_id":"sess-123","num_turns":3,"total_cost_usd":0.01,"permission_denials":[{"tool_name":"Bash","tool_input":{"command":"ls /"}}]}'
+    exit 0
+fi
+echo '{"type":"result","is_error":false,"result":"hello from fake","session_id":"sess-123","num_turns":2,"total_cost_usd":0.005,"permission_denials":[]}'

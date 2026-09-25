@@ -59,5 +59,8 @@ try {
 } catch (InvalidArgumentException $e) {
     respond(['ok' => false, 'error' => $e->getMessage()], 400);
 } catch (Throwable $e) {
-    respond(['ok' => false, 'error' => get_class($e) . ': ' . $e->getMessage()], 500);
+    $msg = get_class($e) . ': ' . $e->getMessage();
+    @file_put_contents(dirname(nb_db_path()) . '/api-errors.log', sprintf("[%s] %s %s\n%s\n%s\n\n",
+        nb_now(), $_SERVER['REQUEST_METHOD'] ?? '', $_SERVER['REQUEST_URI'] ?? '', $msg, $e->getTraceAsString()), FILE_APPEND);
+    respond(['ok' => false, 'error' => $msg], 500);
 }

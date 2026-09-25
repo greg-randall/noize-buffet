@@ -16,8 +16,17 @@ const NB_USAGE = [
     'status' => 'counts and job status',
 ];
 
+/** Print the JSON result, append the call to data/nb.log (one JSON object per line), and exit. */
 function out(mixed $data, int $code = 0): never
 {
+    global $argv;
+    $args = array_slice($argv, 1);
+    $entry = ['at' => nb_now(), 'job' => getenv('NB_JOB_ID') ?: null, 'args' => $args, 'exit' => $code, 'output' => $data];
+    if (($args[0] ?? '') === 'add-batch' && is_file($args[1] ?? '')) {
+        $entry['input'] = (string)file_get_contents($args[1]); // exactly what the agent tried to add
+    }
+    @file_put_contents(dirname(nb_db_path()) . '/nb.log',
+        json_encode($entry, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
     echo json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "\n";
     exit($code);
 }
