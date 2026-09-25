@@ -1,8 +1,8 @@
 # noize-buffet
 
-An endless, ever-changing stream of music suggestions, built around your taste and run entirely on your own machine.
+A music suggestion queue that an AI agent fills with new songs for your taste, running entirely on your own machine.
 
-You chat with an AI agent in a local web page. It asks what you're after, then keeps adding batches of YouTube songs to a queue. You listen in the embedded player. It records how far you got, your rating, your notes and whether a song was new to you, and each new batch learns from that.
+You chat with an AI agent in a local web page. It asks what you're after, then adds a batch of YouTube songs to a queue, and another whenever you ask for more. You listen in the embedded player. It records how far you got, your rating, your notes and whether a song was new to you, and the agent uses all of that when it picks the next batch.
 
 ![noize-buffet: the player, song details and ratings on the left with the playlist below, and the chat with the agent on the right](screenshot.webp)
 
@@ -35,21 +35,19 @@ flowchart LR
     agent -->|"web search and fetch"| web[("Bandcamp, Last.fm, Discogs, ...")]
 ```
 
-`start.py` runs two processes: a small PHP web server for the page, and a job worker. Everything you do in the page goes into a local SQLite database. Each chat message you send becomes a job, and the worker passes jobs one at a time to the agent. The agent is a headless Claude Code session that stays running between messages, so replies after the first skip Claude Code's start-up time. It follows the rulebook in [`CLAUDE.md`](CLAUDE.md).
-
-A typical run goes like this:
+`start.py` runs two processes: a small PHP web server for the page, and a job worker. Everything you do in the page goes into a local SQLite database. Each chat message you send becomes a job, and the worker passes jobs one at a time to the agent. The agent is a Claude Code session running in the background, with no terminal window of its own. It stays running between messages, so replies after the first skip Claude Code's start-up time. It follows the rulebook in [`CLAUDE.md`](CLAUDE.md).
 
 1. On first run the agent interviews you, one question at a time: what you're hoping to find, a few songs you love and why, and what you don't want. It looks up the songs and artists you named and checks anything unclear with you. Then it writes `brief.md` (your goal, in your words) and `taste.md` (its notes on your taste).
-2. Before choosing a batch, the agent researches each seed song on the web: its label and roster, its producers and collaborators, similar-artist pages, and the scene around it. A single person's recommendation needs a second, independent signal before it counts. The agent finds each song on YouTube with `yt_search.py` and adds about 12 to the queue: mostly songs close to what you like, some from its leads, and one wildcard that tests an edge of your taste. Each song records why it's there and the page that led to it.
+2. Before choosing a batch, the agent researches the songs you like on the web (at first, the ones you named): their labels and the other artists on them, their producers and collaborators, similar-artist pages, and the scenes around them. A single person's recommendation needs a second, independent signal before it counts. The agent finds each song on YouTube with `yt_search.py` and adds about 12 to the queue: mostly songs close to what you like, some from artists, labels and scenes it turned up while researching, and one wildcard that tests an edge of your taste. Each song records why it's there and the page that led to it.
 3. The page plays the queue. For each song it records how far you got, your rating (top, yes, good, ok, meh, no), whether it was new to you, and whether it's good but not what you're looking for ("off-brief").
 4. You tell the agent what you think of the song that's playing ("love the drums", "the vocals are generic"). It saves your comment as a note on that song, fills in the rating and toggles your comment implies (you can change them), and updates `taste.md`. You can also paste a song you found, ask for more songs, or ask it to stop suggesting an artist.
-5. The next batch starts from your ratings, notes and chat since the last one, plus the leads the agent has already collected.
+5. For the next batch, the agent reads your ratings, notes and chat since the last one, and reuses the artists, labels and scenes it has already found.
 
 While the agent works, the chat shows what it's doing ("Searching YouTube (12 songs)…", "Reading bandcamp.com…").
 
 ### Memory
 
-The agent's conversation restarts after `session_rotate_turns` messages, after any error, and when a job runs longer than `job_timeout_s` (both in `config.json`). What it knows about you is kept in `brief.md`, `taste.md` and the database, not in the conversation. Every new conversation starts by reading the two files, and each batch starts by reading your latest feedback from the database.
+The agent's conversation restarts after `session_rotate_turns` messages, after any error, and when a job runs longer than `job_timeout_s` (both in `config.json`). What it knows about you is in `brief.md`, `taste.md` and the database. Every new conversation starts by reading the two files, and each batch starts by reading your latest feedback from the database. Anything you said that the agent didn't write into one of those is gone after a restart.
 
 ### Limits on the agent
 
@@ -57,7 +55,7 @@ The agent can read and edit files in this folder, and anything outside it is ref
 
 ### Time and usage
 
-On one measured run, chat replies took about 8 seconds and a first batch with web research took about 4 minutes. The agent runs on whatever account Claude Code is logged in with. A Claude subscription has no per-job charge, but jobs count toward your plan's usage limits, which you share with your own Claude Code use; that researched batch used about as much as 20 chat replies. With an API key, you pay per job. The worker terminal prints each job's API-equivalent cost as a measure of how heavy it was: about $0.05 per chat reply and $1 for that batch. The only other paid service is TypeSafe, which comment mining will use at about $0.02 per 1,000 comments.
+On one measured run, chat replies took about 8 seconds and a first batch with web research took about 4 minutes. The agent runs on whatever account Claude Code is logged in with. A Claude subscription has no per-job charge, but jobs count toward your plan's usage limits, which you share with your own Claude Code use; that researched batch used about as much as 20 chat replies. With an API key, you pay per job. For each job, the worker terminal prints what it would have cost at API prices, as a measure of how heavy it was: about $0.05 per chat reply and $1 for that batch. The only other paid service is TypeSafe, which comment mining will use at about $0.02 per 1,000 comments.
 
 ### Not built yet
 
@@ -77,7 +75,7 @@ Batches don't refill on their own when the queue runs low yet, so for now ask th
 
 ## When something goes wrong
 
-- The worker terminal shows a `tool:` line for each tool the agent calls, as it happens. After each job it prints a line with the status, time, turns, API-equivalent cost and whether the agent process was started or reused, then any `BLOCKED:` lines for tools the agent wasn't allowed to use, and the path to the job's debug file.
+- The worker terminal shows a `tool:` line for each tool the agent calls, as it happens. After each job it prints a line with the status, time, turns, cost at API prices and whether the agent process was started or reused, then any `BLOCKED:` lines for tools the agent wasn't allowed to use, and the path to the job's debug file.
 - `data/jobs/<id>.json`: everything about one agent job: prompt, the agent process's pid and command, duration, blocked tools, every event the agent streamed back, and the path to Claude Code's full transcript of the conversation.
 - `data/nb.log`: every database command the agent ran, with its exact input and output (one JSON object per line).
 - `data/parent-stderr.log`: anything `claude` printed to stderr.
