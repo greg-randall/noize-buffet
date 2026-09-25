@@ -72,6 +72,8 @@ For each seed (the user's named songs at first; later their top/yes songs, songs
 
 Later batches: reuse the **Active leads** in `taste.md` rather than repeating searches, and research at least the newest or highest-rated seeds you haven't researched yet.
 
+**One person's opinion is a hint, not a lead.** A single comment, forum post or Reddit reply saying "if you like X try Y" isn't enough to put Y in a batch. Before a hint becomes a lead, confirm it with a second, independent signal that it fits the brief: another person recommending it separately, a shared label, producer or collaborator, a Bandcamp or Last.fm connection, or a description of its sound that matches what they want. Unconfirmed hints may only fill the **wildcard** slot, and the `reason` must say it's a single unconfirmed mention.
+
 Record what you find under **Active leads** in `taste.md`, with the source URL, so later batches can build on it. If a site won't load or blocks you, note it and try another route; don't invent what a page says.
 
 ## Reading feedback
