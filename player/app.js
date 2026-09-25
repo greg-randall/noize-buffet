@@ -3,7 +3,6 @@
 
 const SAVE_EVERY_MS = 10000;
 const NOTES_DEBOUNCE_MS = 1000;
-const CHAT_POLL_MS = 2000;
 const YT_ERRORS = {2: 'bad video id', 5: 'HTML5 player error', 100: 'removed or private', 101: 'embedding disabled', 150: 'embedding disabled'};
 
 const state = {
@@ -19,6 +18,8 @@ const state = {
   lastSaveAt: 0,
   notesTimer: null,
   lastChatId: 0,
+  chatState: '',       // last job state seen by the long-poll ("<running id>:<queued count>")
+  jobs: null,
   agentBusy: false,
 };
 
@@ -242,16 +243,35 @@ function appendChat(m) {
   log.scrollTop = log.scrollHeight;
 }
 
+// Long-poll: the server holds each request until something changes, then we immediately ask again.
 function pollChat() {
-  $.getJSON('api.php', {action: 'chat', after: state.lastChatId}).done(res => {
+  $.getJSON('api.php', {action: 'chat', after: state.lastChatId, wait: 1, state: state.chatState}).done(res => {
     connOk();
     res.messages.forEach(m => { log(`chat [${m.role}]`, m.text); appendChat(m); state.lastChatId = Number(m.id); });
+    state.chatState = res.state;
+    state.jobs = res.jobs;
     const busy = !!res.jobs.running || res.jobs.queued > 0;
     if (busy !== state.agentBusy) log('agent', busy ? 'busy' : 'idle', res.jobs);
-    $('#agent-status').toggleClass('d-none', !busy).text(res.jobs.running ? 'agent working…' : 'waiting for the agent…');
     if (state.agentBusy && !busy) refreshQueue(false);
     state.agentBusy = busy;
-  }).fail(xhr => connError('chat', xhr));
+    renderAgentStatus();
+    setTimeout(pollChat, 0);
+  }).fail(xhr => {
+    connError('chat', xhr);
+    setTimeout(pollChat, 2000);
+  });
+}
+
+// "agent working… 0:47": a live timer so a long batch visibly isn't stuck.
+function renderAgentStatus() {
+  const j = state.jobs;
+  const busy = !!j && (!!j.running || j.queued > 0);
+  let text = 'waiting for the agent…';
+  if (busy && j.running) {
+    const s = Math.max(0, Math.floor((Date.now() - Date.parse(j.running.started_at)) / 1000));
+    text = `agent working… ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  }
+  $('#agent-status').toggleClass('d-none', !busy).text(text);
 }
 
 // ---------- wiring ----------
@@ -263,7 +283,7 @@ $(function () {
     .fail(xhr => connError('starting up', xhr));
   refreshQueue(true);
   pollChat();
-  setInterval(pollChat, CHAT_POLL_MS);
+  setInterval(renderAgentStatus, 1000);
   setInterval(poll, 1000);
 
   $('#rating-group').on('click', 'button', function () {
@@ -307,7 +327,7 @@ $(function () {
     $('#chat-input').val('');
     log('sending chat:', text);
     $.ajax({url: 'api.php?action=send', method: 'POST', contentType: 'application/json', data: JSON.stringify({message: text})})
-      .done(() => pollChat())
+      .done(() => log('sent; the long-poll will pick up the reply'))
       .fail(xhr => appendChat({role: 'system', text: 'Could not send: ' + ((xhr.responseJSON && xhr.responseJSON.error) || xhr.status)}));
   });
   $('#chat-input').on('keydown', function (e) {

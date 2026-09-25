@@ -33,7 +33,20 @@ try {
             respond(['ok' => true, 'row' => nb_save_listen($pdo, require_post())]);
 
         case 'chat':
-            respond(['messages' => nb_chat_since($pdo, (int)($_GET['after'] ?? 0)), 'jobs' => nb_job_status($pdo)]);
+            // Long-poll: with wait=1, hold the request until there are new messages or the job state changes
+            // (compared with the `state` the client last saw), or 25 seconds pass.
+            $after = (int)($_GET['after'] ?? 0);
+            $known = (string)($_GET['state'] ?? '');
+            $deadline = microtime(true) + (empty($_GET['wait']) ? 0 : 25);
+            while (true) {
+                $messages = nb_chat_since($pdo, $after);
+                $jobs = nb_job_status($pdo);
+                $state = ($jobs['running']['id'] ?? 0) . ':' . $jobs['queued'];
+                if ($messages || $state !== $known || microtime(true) >= $deadline) {
+                    respond(['messages' => $messages, 'jobs' => $jobs, 'state' => $state]);
+                }
+                usleep(200000);
+            }
 
         case 'send':
             $message = trim((string)(require_post()['message'] ?? ''));

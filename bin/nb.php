@@ -14,6 +14,7 @@ const NB_USAGE = [
     'mute <artist|lane> <value>' => 'stop suggesting an artist or a lane',
     'mutes' => 'list mutes',
     'status' => 'counts and job status',
+    'say <text>' => 'post a short message to the user right now, while you keep working (e.g. before a long batch)',
 ];
 
 /** Print the JSON result, append the call to data/nb.log (one JSON object per line), and exit. */
@@ -57,6 +58,14 @@ try {
 
         case 'mute':
             out(['ok' => true, 'id' => nb_mute_add($pdo, $argv[2] ?? '', implode(' ', array_slice($argv, 3)))]);
+
+        case 'say':
+            $text = trim(implode(' ', array_slice($argv, 2)));
+            if ($text === '') {
+                out(['ok' => false, 'error' => 'say needs some text'], 2);
+            }
+            $jobId = getenv('NB_JOB_ID') ? (int)getenv('NB_JOB_ID') : null;
+            out(['ok' => true, 'id' => nb_chat_add($pdo, 'parent', $text, $jobId)]);
 
         case 'mutes':
             out(nb_mutes($pdo));

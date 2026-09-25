@@ -85,4 +85,19 @@ check(nb_setting($pdo, 'k') === null, 'setting cleared');
 nb_mute_add($pdo, 'artist', 'Some Band');
 check(nb_mutes($pdo)[0]['value'] === 'Some Band', 'mute stored');
 
+echo "concurrent connections\n";
+// Regression: a single-row fetch must not leave its cursor open. An open cursor keeps a read lock,
+// so this connection kept seeing a stale snapshot and other processes couldn't write (long-poll bug).
+$path = tmp_dir() . '/test_db.sqlite';
+$a = nb_db($path);
+$b = nb_db($path);
+nb_job_status($a);
+nb_job_next($a);
+nb_listen($a, 'AAAAAAAAAAA');
+$before = count(nb_chat_since($a, 0));
+$wrote = true;
+try { nb_chat_add($b, 'parent', 'written by another connection'); } catch (PDOException) { $wrote = false; }
+check($wrote, 'another connection can write after status/next/listen reads');
+check(count(nb_chat_since($a, 0)) === $before + 1, 'the first connection sees the new row');
+
 finish();

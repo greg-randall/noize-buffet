@@ -52,12 +52,18 @@ check($code === 2 && $res['ok'] === false, 'bad JSON rejected');
 [$code, $res] = nb_cli($cli, ['frobnicate']);
 check($code === 2 && isset($res['usage']), 'unknown command shows usage');
 
+[$code, $r] = nb_cli($cli, ['say', 'Building', 'a', 'batch', 'now']);
+$said = nb_chat_since(nb_db(), 0);
+check($code === 0 && $r['ok'] === true && end($said)['role'] === 'parent' && end($said)['text'] === 'Building a batch now', 'say posts a parent chat message');
+[$code, $r] = nb_cli($cli, ['say']);
+check($code === 2 && $r['ok'] === false, 'say without text rejected');
+
 echo "nb.log\n";
 // The log is append-only across runs, so check the most recent entries.
 $log = array_map(fn($l) => json_decode($l, true), file(tmp_dir() . '/nb.log', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES));
 $last = end($log);
-check($last['args'] === ['frobnicate'] && $last['exit'] === 2, 'last call logged with args and exit code');
-$prev = $log[count($log) - 2];
-check($prev['args'][0] === 'add-batch' && $prev['input'] === 'not json', 'add-batch logs the exact input it was given');
+check($last['args'] === ['say'] && $last['exit'] === 2, 'last call logged with args and exit code');
+$bad = array_values(array_filter($log, fn($e) => ($e['args'][0] ?? '') === 'add-batch' && ($e['input'] ?? '') === 'not json'));
+check(count($bad) > 0, 'add-batch logs the exact input it was given');
 
 finish();
