@@ -325,6 +325,9 @@ function nb_job_status(PDO $pdo): array
     $running = $pdo->query("SELECT id, kind, started_at FROM jobs WHERE status = 'running' ORDER BY id LIMIT 1")->fetch();
     if ($running) {
         $running['id'] = (int)$running['id'];
+        // What the agent is doing right now, written by the worker as tool calls stream in.
+        $activity = json_decode((string)nb_setting($pdo, 'agent_activity'), true);
+        $running['activity'] = ($activity['job'] ?? null) === $running['id'] ? $activity['text'] : null;
     }
     $queued = (int)$pdo->query("SELECT COUNT(*) FROM jobs WHERE status = 'queued'")->fetchColumn();
     return ['running' => $running ?: null, 'queued' => $queued];

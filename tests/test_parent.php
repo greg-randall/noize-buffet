@@ -92,6 +92,22 @@ nb_job_enqueue($pdo, 'interview');
 nb_run_parent_job($pdo, nb_job_next($pdo), $config, $parent);
 check(str_contains($lastInput(), 'interview'), 'interview prompt');
 
+echo "activity shown in the chat panel\n";
+$seen = [];
+$run(['message' => 'what are you doing'], function (array $e) use ($pdo, &$seen) {
+    $seen[] = nb_job_status($pdo)['running']['activity'] ?? null;
+});
+check(in_array('Checking the queue', $seen, true), "tool call becomes the running job's activity"); // the fake runs `php bin/nb.php status`
+check(nb_setting($pdo, 'agent_activity') === null, 'activity cleared when the job ends');
+check(nb_activity_text('Bash', ['command' => 'python3 scripts/yt_search.py "a b" "c d" "e" -n 5']) === 'Searching YouTube (3 songs)', 'YouTube search with a song count');
+check(nb_activity_text('Bash', ['command' => "python3 scripts/yt_search.py 'one song'"]) === 'Searching YouTube', 'single search');
+check(nb_activity_text('Bash', ['command' => 'php bin/nb.php feedback']) === 'Reading your ratings and notes', 'feedback');
+check(nb_activity_text('Bash', ['command' => 'php bin/nb.php say "hi"']) === null, 'say leaves the activity alone');
+check(nb_activity_text('Read', ['file_path' => '/x/taste.md']) === 'Reading your taste notes', 'reading taste.md');
+check(nb_activity_text('Write', ['file_path' => 'data/pending-batch.json']) === 'Putting the batch together', 'writing the batch');
+check(nb_activity_text('WebFetch', ['url' => 'https://example.bandcamp.com/album/x']) === 'Reading example.bandcamp.com', 'web fetch shows the site');
+check(nb_activity_text('WebSearch', ['query' => 'hyperpop cheer']) === 'Searching the web: hyperpop cheer', 'web search shows the query');
+
 echo "worker restart resumes the saved session\n";
 $parent->stop();
 $parent = new NbParentProcess();

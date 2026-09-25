@@ -78,6 +78,52 @@ function nb_describe_tool_input(array $input): string
     return (string)($input['command'] ?? $input['file_path'] ?? $input['url'] ?? $input['query'] ?? json_encode($input, JSON_UNESCAPED_SLASHES));
 }
 
+/** What the agent is doing, in words for the chat panel, from one tool call. Null means "don't change it". */
+function nb_activity_text(string $tool, array $input): ?string
+{
+    $file = basename((string)($input['file_path'] ?? ''));
+    switch ($tool) {
+        case 'Bash':
+            $cmd = trim((string)($input['command'] ?? ''));
+            if (str_starts_with($cmd, 'python3 scripts/yt_search.py')) {
+                $n = preg_match_all('/"[^"]*"|\'[^\']*\'/', $cmd);
+                return 'Searching YouTube' . ($n > 1 ? " ($n songs)" : '');
+            }
+            if (preg_match('#^php bin/nb\.php\s+(\S+)#', $cmd, $m)) {
+                $known = [
+                    'feedback' => 'Reading your ratings and notes',
+                    'queue' => 'Checking the queue',
+                    'status' => 'Checking the queue',
+                    'add-batch' => 'Adding songs to your queue',
+                    'note' => 'Saving your note on this song',
+                    'mute' => 'Updating what to avoid',
+                    'mutes' => 'Checking what to avoid',
+                    'say' => null, // the message itself shows up in the chat
+                ];
+                return array_key_exists($m[1], $known) ? $known[$m[1]] : 'Working';
+            }
+            return 'Running a command';
+        case 'WebSearch':
+            return 'Searching the web: ' . ($input['query'] ?? '');
+        case 'WebFetch':
+            return 'Reading ' . (parse_url((string)($input['url'] ?? ''), PHP_URL_HOST) ?: 'a web page');
+        case 'Read':
+            return ['taste.md' => 'Reading your taste notes', 'brief.md' => 'Reading your brief',
+                'CLAUDE.md' => 'Reading its instructions', 'config.json' => 'Checking the settings'][$file] ?? "Reading $file";
+        case 'Write':
+        case 'Edit':
+            return ['taste.md' => 'Updating your taste notes', 'brief.md' => 'Writing down your brief',
+                'pending-batch.json' => 'Putting the batch together'][$file] ?? "Writing $file";
+    }
+    return 'Working';
+}
+
+/** Save what the agent is doing now (see nb_activity_text) so the chat panel can show it; null clears it. */
+function nb_set_activity(PDO $pdo, int $jobId, ?string $text): void
+{
+    nb_setting_set($pdo, 'agent_activity', $text === null ? null : json_encode(['job' => $jobId, 'text' => $text]));
+}
+
 /** One-line description of a denied tool call, e.g. `Bash: ls /`. */
 function nb_describe_denial(array $d): string
 {
@@ -116,6 +162,20 @@ function nb_run_parent_job(PDO $pdo, array $job, array $config, NbParentProcess 
     }
     $prompt = nb_parent_prompt($job, $sid === null);
 
+    // Keep the chat panel's "what is the agent doing" line current, then pass the event on.
+    nb_set_activity($pdo, $jobId, $job['kind'] === 'interview' ? 'Getting ready' : 'Reading your message');
+    $events = function (array $event) use ($pdo, $jobId, $onEvent): void {
+        foreach (($event['type'] ?? '') === 'assistant' ? $event['message']['content'] ?? [] : [] as $block) {
+            $text = ($block['type'] ?? '') === 'tool_use' ? nb_activity_text((string)$block['name'], $block['input'] ?? []) : null;
+            if ($text !== null) {
+                nb_set_activity($pdo, $jobId, $text);
+            }
+        }
+        if ($onEvent) {
+            $onEvent($event);
+        }
+    };
+
     $started = microtime(true);
     $newProcess = false;
     $prevCost = 0.0;
@@ -131,10 +191,11 @@ function nb_run_parent_job(PDO $pdo, array $job, array $config, NbParentProcess 
             $prevCost = (float)$parent->lastTotalCost;
         }
         $pid = $parent->pid();
-        $r = $parent->send($prompt, (float)$config['job_timeout_s'], $onEvent);
+        $r = $parent->send($prompt, (float)$config['job_timeout_s'], $events);
     } catch (Throwable $e) {
         $r['error'] = $e->getMessage();
     }
+    nb_set_activity($pdo, $jobId, null);
     $res = $r['result'];
     $ok = $res !== null && empty($res['is_error']);
     $error = $ok ? null : ($r['error'] ?? (string)($res['result'] ?? 'the agent reported an error'));

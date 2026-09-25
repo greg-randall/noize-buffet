@@ -255,6 +255,8 @@ function pollChat() {
   $.getJSON('api.php', {action: 'chat', after: state.lastChatId, wait: 1, state: state.chatState}).done(res => {
     connOk();
     res.messages.forEach(m => { log(`chat [${m.role}]`, m.text); appendChat(m); state.lastChatId = Number(m.id); });
+    const activity = res.jobs.running && res.jobs.running.activity;
+    if (activity && activity !== (state.jobs && state.jobs.running && state.jobs.running.activity)) log('agent doing', activity);
     state.chatState = res.state;
     state.jobs = res.jobs;
     const busy = !!res.jobs.running || res.jobs.queued > 0;
@@ -269,16 +271,32 @@ function pollChat() {
   });
 }
 
-// "agent working… 0:47": a live timer so a long batch visibly isn't stuck.
+// "agent working… 0:47" in the navbar, and a temporary bubble at the bottom of the chat saying what the agent is
+// doing right now ("Searching YouTube (12 songs)… 0:47"), so a long batch visibly isn't stuck.
 function renderAgentStatus() {
   const j = state.jobs;
   const busy = !!j && (!!j.running || j.queued > 0);
-  let text = 'waiting for the agent…';
+  let timer = '';
   if (busy && j.running) {
     const s = Math.max(0, Math.floor((Date.now() - Date.parse(j.running.started_at)) / 1000));
-    text = `agent working… ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    timer = ` ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   }
-  $('#agent-status').toggleClass('d-none', !busy).text(text);
+  $('#agent-status').toggleClass('d-none', !busy).text(j && j.running ? `agent working…${timer}` : 'waiting for the agent…');
+
+  let $bubble = $('#agent-activity');
+  if (!busy) { $bubble.remove(); return; }
+  if (!$bubble.length) {
+    $bubble = $('<div id="agent-activity" class="chat-bubble me-auto border rounded-3 px-2 py-1 mb-2 bg-body-tertiary text-body-secondary">')
+      .append($('<div class="small">').text('agent'),
+        $('<div>').append($('<span class="spinner-grow spinner-grow-sm me-2" aria-hidden="true">'), $('<span class="activity-text fst-italic">')));
+  }
+  if (!$bubble.is('#chat-log > :last-child')) {
+    $('#chat-log').append($bubble); // keep it below the newest message
+    const log = document.getElementById('chat-log');
+    log.scrollTop = log.scrollHeight;
+  }
+  const doing = j.running ? (j.running.activity || 'Working') : 'Waiting for the agent';
+  $bubble.find('.activity-text').text(`${doing}…${timer}`);
 }
 
 // ---------- wiring ----------
