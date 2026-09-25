@@ -5,3 +5,4 @@ comments/
 *.sqlite-journal
 docs/
 tests/tmp/
+__pycache__/
