@@ -49,6 +49,14 @@ nb_job_enqueue($pdo, 'chat', ['message' => 'x']);
 nb_run_parent_job($pdo, nb_job_next($pdo), $config);
 check(!in_array('--resume', $args(), true) && nb_setting($pdo, 'parent_turns') === '1', 'rotates after session_rotate_turns');
 
+echo "song context in the prompt\n";
+nb_job_enqueue($pdo, 'chat', ['message' => 'love the drums', 'song' => nb_song_context(
+    ['video_id' => 'AAAAAAAAAAA', 'artist' => 'Some Artist', 'title' => 'Some Song', 'furthest_pct' => 64, 'rating' => 'yes', 'new_to_me' => true])]);
+nb_run_parent_job($pdo, nb_job_next($pdo), $config);
+$p = $args()[array_search('-p', $args(), true) + 1];
+check(str_contains($p, 'currently listening to: Some Artist - Some Song [video_id AAAAAAAAAAA]') && str_contains($p, 'heard 64%')
+    && str_contains($p, 'rating: yes') && str_contains($p, 'new to them') && str_contains($p, 'love the drums'), 'prompt carries the current song');
+
 echo "interview prompt\n";
 nb_job_enqueue($pdo, 'interview');
 nb_run_parent_job($pdo, nb_job_next($pdo), $config);

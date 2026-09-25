@@ -216,6 +216,34 @@ function nb_save_listen(PDO $pdo, array $in): array
     return nb_listen($pdo, $vid);
 }
 
+/** Append a note to a song's notes (never overwrites; old versions follow the note-history rule). */
+function nb_append_note(PDO $pdo, string $videoId, string $text): array
+{
+    $text = trim($text);
+    if ($text === '') {
+        throw new InvalidArgumentException('note text is empty');
+    }
+    $old = trim((string)(nb_listen($pdo, $videoId)['notes'] ?? ''));
+    return nb_save_listen($pdo, ['video_id' => $videoId, 'notes' => $old === '' ? $text : "$old\n$text"]);
+}
+
+/** Keep only the known fields of the "current song" the browser sends with a chat message. */
+function nb_song_context(mixed $song): ?array
+{
+    if (!is_array($song) || !preg_match(NB_VIDEO_ID_RE, (string)($song['video_id'] ?? ''))) {
+        return null;
+    }
+    return [
+        'video_id' => (string)$song['video_id'],
+        'artist' => (string)($song['artist'] ?? ''),
+        'title' => (string)($song['title'] ?? ''),
+        'furthest_pct' => isset($song['furthest_pct']) ? (int)$song['furthest_pct'] : null,
+        'rating' => in_array($song['rating'] ?? null, NB_RATINGS, true) ? $song['rating'] : null,
+        'off_brief' => !empty($song['off_brief']),
+        'new_to_me' => array_key_exists('new_to_me', $song) && $song['new_to_me'] !== null ? (bool)$song['new_to_me'] : null,
+    ];
+}
+
 /** Listens (with song info) changed after $since (ISO time), or all if $since is null. */
 function nb_feedback_since(PDO $pdo, ?string $since): array
 {

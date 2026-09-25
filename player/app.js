@@ -2,7 +2,6 @@
 'use strict';
 
 const SAVE_EVERY_MS = 10000;
-const NOTES_DEBOUNCE_MS = 1000;
 const YT_ERRORS = {2: 'bad video id', 5: 'HTML5 player error', 100: 'removed or private', 101: 'embedding disabled', 150: 'embedding disabled'};
 
 const state = {
@@ -16,7 +15,6 @@ const state = {
   furthest: 0,
   duration: null,
   lastSaveAt: 0,
-  notesTimer: null,
   lastChatId: 0,
   chatState: '',       // last job state seen by the long-poll ("<running id>:<queued count>")
   jobs: null,
@@ -24,7 +22,6 @@ const state = {
 };
 
 const cur = () => state.songs[state.i];
-const notesDirty = () => !!cur() && $('#notes').val() !== (cur().notes || '');
 
 // Noisy on purpose: every interesting event goes to the browser console with an [nb] prefix.
 const log = (...args) => console.log('[nb]', ...args);
@@ -48,7 +45,7 @@ function setStatus(text, cls) {
 function payload(extra) {
   const s = cur();
   return Object.assign({
-    video_id: s.video_id, furthest_pct: state.furthest, duration_s: state.duration, notes: $('#notes').val(),
+    video_id: s.video_id, furthest_pct: state.furthest, duration_s: state.duration,
   }, extra || {});
 }
 
@@ -141,7 +138,8 @@ function loadSong(idx, autoplay, byUser) {
   $('#song-artist').text(s.artist);
   $('#song-meta').text([s.bucket, s.source].filter(Boolean).join(' · '));
   $('#song-reason').text(s.reason || '');
-  $('#notes').val(s.notes || '');
+  renderSongNotes();
+  $('#chat-input').attr('placeholder', `What do you think of "${s.title}"? Or ask for anything…`);
   $('#rating-group button').removeClass('active').filter(`[data-rating="${s.rating}"]`).addClass('active');
   $('#off-brief').prop('checked', Number(s.off_brief) === 1);
   const ntm = s.new_to_me === null || s.new_to_me === undefined ? '' : String(s.new_to_me);
@@ -154,17 +152,26 @@ function loadSong(idx, autoplay, byUser) {
   cueOrLoad(s.video_id, autoplay);
 }
 
-// Save the current song on the way out, but only if it was played (or has an unsaved note).
+function renderSongNotes() {
+  const s = cur();
+  $('#song-notes').text(s && s.notes ? s.notes : 'none yet');
+}
+
+// The current song, sent with each chat message so the agent knows what you're listening to.
+function songContext() {
+  const s = cur();
+  if (!s) return null;
+  return {video_id: s.video_id, artist: s.artist, title: s.title, furthest_pct: Math.round(state.furthest),
+    rating: s.rating || null, off_brief: Number(s.off_brief) === 1, new_to_me: s.new_to_me === null || s.new_to_me === undefined ? null : Number(s.new_to_me) === 1};
+}
+
+// Save the current song on the way out, but only if it actually played.
 function saveOnLeave(movingForward) {
-  clearTimeout(state.notesTimer);
   if (state.played) {
     const ended = state.ready && state.player.getPlayerState() === YT.PlayerState.ENDED;
     const skipped = movingForward && !ended && state.furthest < 100;
     log('leaving played song', cur().video_id, skipped ? '→ marked skipped' : '→ saved', {furthest: state.furthest, ended});
     save(skipped ? {skipped: 1} : {});
-  } else if (notesDirty()) {
-    log('leaving unplayed song with a pending note → saving the note only', cur().video_id);
-    save();
   } else {
     log('leaving unplayed song → not recorded', cur().video_id);
   }
@@ -252,7 +259,7 @@ function pollChat() {
     state.jobs = res.jobs;
     const busy = !!res.jobs.running || res.jobs.queued > 0;
     if (busy !== state.agentBusy) log('agent', busy ? 'busy' : 'idle', res.jobs);
-    if (state.agentBusy && !busy) refreshQueue(false);
+    if (state.agentBusy && !busy) refreshQueue(false).done(renderSongNotes); // picks up new songs and notes the agent recorded
     state.agentBusy = busy;
     renderAgentStatus();
     setTimeout(pollChat, 0);
@@ -309,13 +316,6 @@ $(function () {
     save({new_to_me: this.value === '' ? null : this.value === '1'});
   });
 
-  $('#notes').on('input', function () {
-    if (!cur()) return;
-    state.interacted = true;
-    clearTimeout(state.notesTimer);
-    state.notesTimer = setTimeout(() => save(), NOTES_DEBOUNCE_MS);
-  });
-
   $('#btn-next').on('click', () => { log('clicked Next'); leaveAndGo(state.i + 1); });
   $('#btn-back').on('click', () => { log('clicked Back'); leaveAndGo(state.i - 1); });
   $('#queue-list').on('click', 'tr', function () { leaveAndGo(parseInt($(this).data('idx'), 10)); });
@@ -325,8 +325,10 @@ $(function () {
     const text = $('#chat-input').val().trim();
     if (!text) return;
     $('#chat-input').val('');
-    log('sending chat:', text);
-    $.ajax({url: 'api.php?action=send', method: 'POST', contentType: 'application/json', data: JSON.stringify({message: text})})
+    if (cur()) state.interacted = true; // talking about the song counts as being here
+    const song = songContext();
+    log('sending chat:', text, song ? `(about ${song.artist} - ${song.title})` : '');
+    $.ajax({url: 'api.php?action=send', method: 'POST', contentType: 'application/json', data: JSON.stringify({message: text, song})})
       .done(() => log('sent; the long-poll will pick up the reply'))
       .fail(xhr => appendChat({role: 'system', text: 'Could not send: ' + ((xhr.responseJSON && xhr.responseJSON.error) || xhr.status)}));
   });
@@ -335,7 +337,7 @@ $(function () {
   });
 
   window.addEventListener('beforeunload', () => {
-    if (!cur() || !(state.played || notesDirty())) return;
+    if (!cur() || !state.played) return;
     navigator.sendBeacon('api.php?action=save', new Blob([JSON.stringify(payload())], {type: 'application/json'}));
   });
 });

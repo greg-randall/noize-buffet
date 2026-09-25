@@ -49,12 +49,13 @@ try {
             }
 
         case 'send':
-            $message = trim((string)(require_post()['message'] ?? ''));
+            $in = require_post();
+            $message = trim((string)($in['message'] ?? ''));
             if ($message === '') {
                 respond(['ok' => false, 'error' => 'empty message'], 400);
             }
             $chatId = nb_chat_add($pdo, 'user', $message);
-            $jobId = nb_job_enqueue($pdo, 'chat', ['message' => $message]);
+            $jobId = nb_job_enqueue($pdo, 'chat', ['message' => $message, 'song' => nb_song_context($in['song'] ?? null)]);
             respond(['ok' => true, 'chat_id' => $chatId, 'job_id' => $jobId]);
 
         case 'start':

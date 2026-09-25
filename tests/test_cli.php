@@ -58,11 +58,16 @@ check($code === 0 && $r['ok'] === true && end($said)['role'] === 'parent' && end
 [$code, $r] = nb_cli($cli, ['say']);
 check($code === 2 && $r['ok'] === false, 'say without text rejected');
 
+[$code, $r] = nb_cli($cli, ['note', 'AAAAAAAAAAA', 'love', 'the', 'drums']);
+check($code === 0 && str_ends_with($r['notes'], 'love the drums'), 'note appends to the song');
+[$code, $r] = nb_cli($cli, ['note', 'ZZZZZZZZZZZ', 'x']);
+check($code === 2 && $r['ok'] === false, 'note on unknown song rejected');
+
 echo "nb.log\n";
 // The log is append-only across runs, so check the most recent entries.
 $log = array_map(fn($l) => json_decode($l, true), file(tmp_dir() . '/nb.log', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES));
 $last = end($log);
-check($last['args'] === ['say'] && $last['exit'] === 2, 'last call logged with args and exit code');
+check($last['args'] === ['note', 'ZZZZZZZZZZZ', 'x'] && $last['exit'] === 2, 'last call logged with args and exit code');
 $bad = array_values(array_filter($log, fn($e) => ($e['args'][0] ?? '') === 'add-batch' && ($e['input'] ?? '') === 'not json'));
 check(count($bad) > 0, 'add-batch logs the exact input it was given');
 

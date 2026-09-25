@@ -55,6 +55,14 @@ $threw = function (array $in) use ($pdo): bool {
 check($threw(['video_id' => 'ZZZZZZZZZZZ']), 'unknown song rejected');
 check($threw(['video_id' => $A, 'rating' => 'amazing']), 'bad rating rejected');
 
+echo "notes appended\n";
+nb_append_note($pdo, $B, 'first thought');
+$row = nb_append_note($pdo, $B, 'second thought');
+check($row['notes'] === "first thought\nsecond thought", 'notes are appended, not overwritten');
+check(nb_song_context(['video_id' => 'bad']) === null && nb_song_context(null) === null, 'bad song context ignored');
+$ctx = nb_song_context(['video_id' => $A, 'artist' => 'x', 'title' => 'y', 'furthest_pct' => 64.7, 'rating' => 'nope', 'extra' => 1]);
+check($ctx['furthest_pct'] === 64 && $ctx['rating'] === null && !isset($ctx['extra']) && $ctx['new_to_me'] === null, 'song context keeps known fields only');
+
 echo "feedback\n";
 // Timestamps have 1-second resolution; move the batch into the past so "since the batch" is unambiguous.
 $pdo->exec("UPDATE batches SET created_at = '2001-01-01T00:00:00Z'");

@@ -71,14 +71,15 @@
         <label class="btn btn-outline-secondary" for="ntm-unset">–</label>
       </div>
 
-      <label for="notes" class="form-label">Notes</label>
-      <textarea id="notes" class="form-control" rows="5" placeholder="What works, what doesn't…"></textarea>
+      <div class="small text-body-secondary">Your notes on this song (the agent records them from the chat):</div>
+      <div id="song-notes" class="chat-text small border rounded p-2 text-body-secondary">none yet</div>
     </div>
 
     <div class="col-xl-4">
-      <div id="chat-log" class="border rounded p-2 mb-2"></div>
+      <h2 class="h6 mb-2">Talk to the agent</h2>
+      <div id="chat-log" class="border rounded p-2 mb-2 bg-body-secondary"></div>
       <form id="chat-form" class="d-flex gap-2">
-        <textarea id="chat-input" class="form-control" rows="2" placeholder="Talk to the agent: add a song you found, ask for more, 'enough of this artist'…"></textarea>
+        <textarea id="chat-input" class="form-control" rows="2" placeholder="What do you think of this song? Or ask for anything…"></textarea>
         <button class="btn btn-primary" type="submit">Send</button>
       </form>
     </div>

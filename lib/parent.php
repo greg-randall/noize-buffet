@@ -16,7 +16,20 @@ function nb_parent_prompt(array $job, bool $newSession): string
     }
     $payload = json_decode((string)($job['payload'] ?? ''), true) ?: [];
     $message = trim((string)($payload['message'] ?? ''));
-    return $intro . "Message from the user in the web UI chat:\n\n$message\n\nYour final reply is shown to them in the chat panel.";
+    $song = $payload['song'] ?? null;
+    $context = '';
+    if (is_array($song)) {
+        $bits = ["heard {$song['furthest_pct']}%", 'rating: ' . ($song['rating'] ?? 'none')];
+        if ($song['off_brief']) {
+            $bits[] = 'marked off-brief';
+        }
+        if ($song['new_to_me'] !== null) {
+            $bits[] = $song['new_to_me'] ? 'new to them' : 'they already knew it';
+        }
+        $context = "(They are currently listening to: {$song['artist']} - {$song['title']} [video_id {$song['video_id']}], "
+            . implode(', ', $bits) . ".)\n\n";
+    }
+    return $intro . "Message from the user in the web UI chat:\n\n$context$message\n\nYour final reply is shown to them in the chat panel.";
 }
 
 function nb_parent_command(string $prompt, ?string $sessionId, array $config): array

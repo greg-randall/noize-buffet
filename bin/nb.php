@@ -14,6 +14,7 @@ const NB_USAGE = [
     'mute <artist|lane> <value>' => 'stop suggesting an artist or a lane',
     'mutes' => 'list mutes',
     'status' => 'counts and job status',
+    'note <video_id> <text>' => "append the user's comment to that song's notes",
     'say <text>' => 'post a short message to the user right now, while you keep working (e.g. before a long batch)',
 ];
 
@@ -58,6 +59,10 @@ try {
 
         case 'mute':
             out(['ok' => true, 'id' => nb_mute_add($pdo, $argv[2] ?? '', implode(' ', array_slice($argv, 3)))]);
+
+        case 'note':
+            $row = nb_append_note($pdo, $argv[2] ?? '', implode(' ', array_slice($argv, 3)));
+            out(['ok' => true, 'video_id' => $row['video_id'], 'notes' => $row['notes']]);
 
         case 'say':
             $text = trim(implode(' ', array_slice($argv, 2)));
