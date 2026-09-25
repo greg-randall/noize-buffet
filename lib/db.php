@@ -7,6 +7,9 @@ const NB_JOB_KINDS = ['interview', 'chat', 'refill'];
 const NB_MUTE_KINDS = ['artist', 'lane'];
 const NB_NOTE_HISTORY_AFTER_S = 600; // keep an old note only if last changed 10+ minutes ago
 const NB_VIDEO_ID_RE = '/^[A-Za-z0-9_-]{11}$/';
+const NB_MINE_RATINGS = ['top', 'yes']; // rating a song one of these queues its comments for mining
+const NB_MINING_STATUSES = ['queued', 'downloading', 'filtering', 'extracting', 'done', 'failed'];
+const NB_MINING_FIELDS = ['status', 'filter', 'error', 'comments', 'flagged', 'covered', 'mentions'];
 
 function nb_root(): string
 {
@@ -64,6 +67,15 @@ function nb_create_tables(PDO $pdo): void
         'CREATE TABLE IF NOT EXISTS mutes (
             id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, value TEXT NOT NULL, created_at TEXT NOT NULL)',
         'CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)',
+        'CREATE TABLE IF NOT EXISTS mining (
+            video_id TEXT PRIMARY KEY, status TEXT NOT NULL, filter TEXT, error TEXT,
+            comments INTEGER, flagged INTEGER, covered INTEGER, mentions INTEGER,
+            queued_at TEXT NOT NULL, updated_at TEXT NOT NULL)',
+        'CREATE TABLE IF NOT EXISTS leads (
+            name_key TEXT PRIMARY KEY, name TEXT NOT NULL, strength TEXT NOT NULL,
+            people INTEGER NOT NULL, videos INTEGER NOT NULL, mentions INTEGER NOT NULL, likes INTEGER NOT NULL,
+            unsure_only INTEGER NOT NULL, songs_json TEXT NOT NULL, video_ids_json TEXT NOT NULL,
+            examples_json TEXT NOT NULL, updated_at TEXT NOT NULL)',
     ] as $sql) {
         $pdo->exec($sql);
     }
@@ -124,11 +136,17 @@ function nb_locked(PDO $pdo, callable $fn): mixed
     }
 }
 
-/** Run $fn in a write transaction (under the lock) and return its result. */
+/** Run $fn in a write transaction (under the lock) and return its result. A write inside a write joins it. */
 function nb_write(PDO $pdo, callable $fn): mixed
 {
-    return nb_locked($pdo, function () use ($pdo, $fn) {
+    static $open = []; // spl_object_id of each connection currently inside nb_write
+    $id = spl_object_id($pdo);
+    if (isset($open[$id])) {
+        return $fn();
+    }
+    return nb_locked($pdo, function () use ($pdo, $fn, $id, &$open) {
         $pdo->exec('BEGIN IMMEDIATE');
+        $open[$id] = true;
         try {
             $result = $fn();
             $pdo->exec('COMMIT');
@@ -136,6 +154,8 @@ function nb_write(PDO $pdo, callable $fn): mixed
         } catch (Throwable $e) {
             $pdo->exec('ROLLBACK');
             throw $e;
+        } finally {
+            unset($open[$id]);
         }
     });
 }
@@ -180,6 +200,9 @@ function nb_add_batch(PDO $pdo, array $songs, string $summary, ?int $jobId): arr
                 $now, $batchId, $bucket, (string)($s['reason'] ?? ''), (string)($s['source'] ?? ''),
             ]);
             $added[] = $vid;
+            if ($bucket === 'user') {
+                nb_mining_enqueue($pdo, $vid); // a song they named: mine its comments for leads
+            }
         }
         if ($added === []) {
             $pdo->prepare('DELETE FROM batches WHERE id = ?')->execute([$batchId]);
@@ -286,6 +309,9 @@ function nb_save_listen(PDO $pdo, array $in): array
         }
         if (isset($in['error']) && $in['error'] !== '') {
             $pdo->prepare('UPDATE songs SET unplayable_error = ? WHERE video_id = ?')->execute([(string)$in['error'], $vid]);
+        }
+        if ($rating !== null && in_array($rating, NB_MINE_RATINGS, true)) {
+            nb_mining_enqueue($pdo, $vid); // a song they love: mine its comments for leads
         }
         return nb_listen($pdo, $vid);
     });
@@ -461,6 +487,134 @@ function nb_refill_check(PDO $pdo, int $threshold): array
         }
         return ['refill' => true, 'unplayed' => $unplayed, 'why' => "$unplayed songs left"];
     });
+}
+
+// ---------- comment mining ----------
+
+/** Queue a video's comments for mining (once per video). Returns true if it was newly queued. */
+function nb_mining_enqueue(PDO $pdo, string $videoId): bool
+{
+    return nb_write($pdo, function () use ($pdo, $videoId): bool {
+        $now = nb_now();
+        $st = $pdo->prepare("INSERT OR IGNORE INTO mining (video_id, status, queued_at, updated_at) VALUES (?, 'queued', ?, ?)");
+        $st->execute([$videoId, $now, $now]);
+        return $st->rowCount() === 1;
+    });
+}
+
+/** Queue songs rated top/yes or named by the user that aren't queued yet (e.g. rated before mining existed). */
+function nb_mining_backfill(PDO $pdo): int
+{
+    return nb_write($pdo, function () use ($pdo): int {
+        $in = implode(', ', array_fill(0, count(NB_MINE_RATINGS), '?'));
+        $st = $pdo->prepare("SELECT s.video_id FROM songs s LEFT JOIN listens l ON l.video_id = s.video_id
+            LEFT JOIN mining m ON m.video_id = s.video_id
+            WHERE m.video_id IS NULL AND (s.bucket = 'user' OR l.rating IN ($in))");
+        $st->execute(NB_MINE_RATINGS);
+        $n = 0;
+        foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $vid) {
+            $n += nb_mining_enqueue($pdo, (string)$vid) ? 1 : 0;
+        }
+        return $n;
+    });
+}
+
+/** Take the oldest queued video and mark it downloading (atomic); null if none is queued. */
+function nb_mining_next(PDO $pdo): ?array
+{
+    return nb_write($pdo, function () use ($pdo): ?array {
+        $row = $pdo->query("SELECT * FROM mining WHERE status = 'queued' ORDER BY queued_at, video_id LIMIT 1")->fetch();
+        if (!$row) {
+            return null;
+        }
+        $now = nb_now();
+        $pdo->prepare("UPDATE mining SET status = 'downloading', error = NULL, updated_at = ? WHERE video_id = ?")
+            ->execute([$now, $row['video_id']]);
+        return ['status' => 'downloading', 'error' => null, 'updated_at' => $now] + $row;
+    });
+}
+
+/** Set some of a mining row's fields (NB_MINING_FIELDS). */
+function nb_mining_update(PDO $pdo, string $videoId, array $fields): void
+{
+    $bad = array_diff(array_keys($fields), NB_MINING_FIELDS);
+    if ($bad) {
+        throw new InvalidArgumentException('unknown mining field(s): ' . implode(', ', $bad));
+    }
+    if (isset($fields['status']) && !in_array($fields['status'], NB_MINING_STATUSES, true)) {
+        throw new InvalidArgumentException('mining status must be one of ' . implode(', ', NB_MINING_STATUSES));
+    }
+    nb_write($pdo, function () use ($pdo, $videoId, $fields): void {
+        $sets = implode(', ', array_map(fn($k) => "$k = ?", array_keys($fields)));
+        $pdo->prepare("UPDATE mining SET $sets, updated_at = ? WHERE video_id = ?")
+            ->execute([...array_values($fields), nb_now(), $videoId]);
+    });
+}
+
+/** Every mining row with its song's artist and title, newest first. */
+function nb_mining_list(PDO $pdo): array
+{
+    return nb_locked($pdo, fn() => $pdo->query('SELECT m.*, s.artist, s.title FROM mining m
+        LEFT JOIN songs s ON s.video_id = m.video_id ORDER BY m.queued_at DESC, m.video_id')->fetchAll());
+}
+
+/** Videos left mid-mining when the worker stopped go back in the queue; their steps are redone. */
+function nb_mining_recover_interrupted(PDO $pdo): int
+{
+    return nb_write($pdo, function () use ($pdo): int {
+        $st = $pdo->prepare("UPDATE mining SET status = 'queued', updated_at = ?
+            WHERE status IN ('downloading', 'filtering', 'extracting')");
+        $st->execute([nb_now()]);
+        return $st->rowCount();
+    });
+}
+
+/** Replace the whole leads table with $leads (the "leads" rows from mining/merge_leads.py). */
+function nb_leads_replace(PDO $pdo, array $leads): void
+{
+    nb_write($pdo, function () use ($pdo, $leads): void {
+        $pdo->exec('DELETE FROM leads');
+        $st = $pdo->prepare('INSERT INTO leads (name_key, name, strength, people, videos, mentions, likes, unsure_only,
+            songs_json, video_ids_json, examples_json, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $now = nb_now();
+        foreach ($leads as $l) {
+            $st->execute([$l['name_key'], $l['name'], $l['strength'], (int)$l['people'], (int)$l['videos'],
+                (int)$l['mentions'], (int)$l['likes'], empty($l['unsure_only']) ? 0 : 1,
+                json_encode($l['songs'] ?? [], JSON_UNESCAPED_UNICODE), json_encode($l['video_ids'] ?? []),
+                json_encode($l['examples'] ?? [], JSON_UNESCAPED_UNICODE), $now]);
+        }
+    });
+}
+
+/** Every lead, confirmed before hints, then by people, videos and likes; JSON fields decoded. */
+function nb_leads(PDO $pdo): array
+{
+    $rows = nb_locked($pdo, fn() => $pdo->query("SELECT * FROM leads
+        ORDER BY strength = 'confirmed' DESC, people DESC, videos DESC, likes DESC, name")->fetchAll());
+    return array_map(function (array $r): array {
+        foreach (['songs', 'video_ids', 'examples'] as $k) {
+            $r[$k] = json_decode((string)$r["{$k}_json"], true) ?: [];
+            unset($r["{$k}_json"]);
+        }
+        foreach (['people', 'videos', 'mentions', 'likes', 'unsure_only'] as $k) {
+            $r[$k] = (int)$r[$k];
+        }
+        return $r;
+    }, $rows);
+}
+
+/**
+ * Grouping key for an artist name: lowercase, accents and a leading "the" dropped, letters and digits only.
+ * Must match norm() in mining/mentions.py (tests/test_mining.py checks they agree).
+ */
+function nb_name_key(string $name): string
+{
+    $name = mb_strtolower(trim($name));
+    if (class_exists('Normalizer')) { // the intl extension; without it, accented names keep their accents
+        $name = (string)preg_replace('/\p{Mn}+/u', '', (string)Normalizer::normalize($name, Normalizer::FORM_KD));
+    }
+    $name = (string)preg_replace('/^the\s+/u', '', $name);
+    return (string)preg_replace('/[^\p{L}\p{N}]+/u', '', $name);
 }
 
 // ---------- settings and mutes ----------
