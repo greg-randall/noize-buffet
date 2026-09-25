@@ -10,6 +10,7 @@ const NB_VIDEO_ID_RE = '/^[A-Za-z0-9_-]{11}$/';
 const NB_MINE_RATINGS = ['top', 'yes']; // rating a song one of these queues its comments for mining
 const NB_MINING_STATUSES = ['queued', 'downloading', 'filtering', 'extracting', 'done', 'failed'];
 const NB_MINING_FIELDS = ['status', 'filter', 'error', 'comments', 'flagged', 'covered', 'mentions'];
+const NB_LEAD_STRENGTHS = ['confirmed', 'hint'];
 
 function nb_root(): string
 {
@@ -136,7 +137,11 @@ function nb_locked(PDO $pdo, callable $fn): mixed
     }
 }
 
-/** Run $fn in a write transaction (under the lock) and return its result. A write inside a write joins it. */
+/**
+ * Run $fn in a write transaction (under the lock) and return its result. A write inside a write joins it.
+ * An inner write's error must propagate: catching it inside an outer write would commit whatever the inner write
+ * already did.
+ */
 function nb_write(PDO $pdo, callable $fn): mixed
 {
     static $open = []; // spl_object_id of each connection currently inside nb_write
@@ -152,7 +157,11 @@ function nb_write(PDO $pdo, callable $fn): mixed
             $pdo->exec('COMMIT');
             return $result;
         } catch (Throwable $e) {
-            $pdo->exec('ROLLBACK');
+            try {
+                $pdo->exec('ROLLBACK');
+            } catch (Throwable) {
+                // SQLite may have rolled back already; keep the original error
+            }
             throw $e;
         } finally {
             unset($open[$id]);
@@ -523,7 +532,7 @@ function nb_mining_backfill(PDO $pdo): int
 function nb_mining_next(PDO $pdo): ?array
 {
     return nb_write($pdo, function () use ($pdo): ?array {
-        $row = $pdo->query("SELECT * FROM mining WHERE status = 'queued' ORDER BY queued_at, video_id LIMIT 1")->fetch();
+        $row = $pdo->query("SELECT * FROM mining WHERE status = 'queued' ORDER BY queued_at, rowid LIMIT 1")->fetch();
         if (!$row) {
             return null;
         }
@@ -537,6 +546,9 @@ function nb_mining_next(PDO $pdo): ?array
 /** Set some of a mining row's fields (NB_MINING_FIELDS). */
 function nb_mining_update(PDO $pdo, string $videoId, array $fields): void
 {
+    if ($fields === []) {
+        throw new InvalidArgumentException('nothing to update');
+    }
     $bad = array_diff(array_keys($fields), NB_MINING_FIELDS);
     if ($bad) {
         throw new InvalidArgumentException('unknown mining field(s): ' . implode(', ', $bad));
@@ -546,8 +558,11 @@ function nb_mining_update(PDO $pdo, string $videoId, array $fields): void
     }
     nb_write($pdo, function () use ($pdo, $videoId, $fields): void {
         $sets = implode(', ', array_map(fn($k) => "$k = ?", array_keys($fields)));
-        $pdo->prepare("UPDATE mining SET $sets, updated_at = ? WHERE video_id = ?")
-            ->execute([...array_values($fields), nb_now(), $videoId]);
+        $st = $pdo->prepare("UPDATE mining SET $sets, updated_at = ? WHERE video_id = ?");
+        $st->execute([...array_values($fields), nb_now(), $videoId]);
+        if ($st->rowCount() === 0) {
+            throw new RuntimeException("no mining row for $videoId");
+        }
     });
 }
 
@@ -572,7 +587,13 @@ function nb_mining_recover_interrupted(PDO $pdo): int
 /** Replace the whole leads table with $leads (the "leads" rows from mining/merge_leads.py). */
 function nb_leads_replace(PDO $pdo, array $leads): void
 {
-    nb_write($pdo, function () use ($pdo, $leads): void {
+    foreach ($leads as $l) {
+        if (!in_array($l['strength'], NB_LEAD_STRENGTHS, true)) {
+            throw new InvalidArgumentException('lead strength must be one of ' . implode(', ', NB_LEAD_STRENGTHS));
+        }
+    }
+    $jsonFlags = JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR;
+    nb_write($pdo, function () use ($pdo, $leads, $jsonFlags): void {
         $pdo->exec('DELETE FROM leads');
         $st = $pdo->prepare('INSERT INTO leads (name_key, name, strength, people, videos, mentions, likes, unsure_only,
             songs_json, video_ids_json, examples_json, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
@@ -580,8 +601,8 @@ function nb_leads_replace(PDO $pdo, array $leads): void
         foreach ($leads as $l) {
             $st->execute([$l['name_key'], $l['name'], $l['strength'], (int)$l['people'], (int)$l['videos'],
                 (int)$l['mentions'], (int)$l['likes'], empty($l['unsure_only']) ? 0 : 1,
-                json_encode($l['songs'] ?? [], JSON_UNESCAPED_UNICODE), json_encode($l['video_ids'] ?? []),
-                json_encode($l['examples'] ?? [], JSON_UNESCAPED_UNICODE), $now]);
+                json_encode($l['songs'] ?? [], $jsonFlags), json_encode($l['video_ids'] ?? [], $jsonFlags),
+                json_encode($l['examples'] ?? [], $jsonFlags), $now]);
         }
     });
 }
@@ -593,7 +614,7 @@ function nb_leads(PDO $pdo): array
         ORDER BY strength = 'confirmed' DESC, people DESC, videos DESC, likes DESC, name")->fetchAll());
     return array_map(function (array $r): array {
         foreach (['songs', 'video_ids', 'examples'] as $k) {
-            $r[$k] = json_decode((string)$r["{$k}_json"], true) ?: [];
+            $r[$k] = json_decode((string)$r["{$k}_json"], true, 512, JSON_THROW_ON_ERROR);
             unset($r["{$k}_json"]);
         }
         foreach (['people', 'videos', 'mentions', 'likes', 'unsure_only'] as $k) {
@@ -604,16 +625,28 @@ function nb_leads(PDO $pdo): array
 }
 
 /**
- * Grouping key for an artist name: lowercase, accents and a leading "the" dropped, letters and digits only.
- * Must match norm() in mining/mentions.py (tests/test_mining.py checks they agree).
+ * Grouping key for an artist name. Steps (must match norm() in mining/mentions.py exactly;
+ * tests/test_mining.py checks they agree):
+ *   (a) trim Unicode whitespace at both ends (NBSP included);
+ *   (b) lowercase;
+ *   (c) NFKD-normalise and strip combining marks (\p{Mn});
+ *   (d) lowercase again (NFKD can surface new uppercase letters, e.g. compatibility decompositions);
+ *   (e) replace a final sigma "ς" with a regular sigma "σ";
+ *   (f) drop a leading "the" followed by whitespace;
+ *   (g) keep only letters and digits.
+ * Requires the intl extension (for Normalizer); throws rather than silently degrading if it's missing.
  */
 function nb_name_key(string $name): string
 {
-    $name = mb_strtolower(trim($name));
-    if (class_exists('Normalizer')) { // the intl extension; without it, accented names keep their accents
-        $name = (string)preg_replace('/\p{Mn}+/u', '', (string)Normalizer::normalize($name, Normalizer::FORM_KD));
+    if (!class_exists('Normalizer')) {
+        throw new RuntimeException('nb_name_key needs the PHP intl extension');
     }
-    $name = (string)preg_replace('/^the\s+/u', '', $name);
+    $name = (string)preg_replace('/^[\p{Z}\s]+|[\p{Z}\s]+$/u', '', $name);
+    $name = mb_strtolower($name);
+    $name = (string)preg_replace('/\p{Mn}+/u', '', (string)Normalizer::normalize($name, Normalizer::FORM_KD));
+    $name = mb_strtolower($name);
+    $name = str_replace('ς', 'σ', $name);
+    $name = (string)preg_replace('/^the[\p{Z}\s]+/u', '', $name);
     return (string)preg_replace('/[^\p{L}\p{N}]+/u', '', $name);
 }
 
