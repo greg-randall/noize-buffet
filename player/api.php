@@ -60,13 +60,17 @@ try {
 
         case 'start':
             require_post();
-            $empty = (int)$pdo->query('SELECT COUNT(*) FROM chat')->fetchColumn() === 0
-                && (int)$pdo->query('SELECT COUNT(*) FROM jobs')->fetchColumn() === 0;
-            if ($empty) {
-                // Shown straight away: the agent's first real message takes a while (start-up, reading its files).
-                nb_chat_add($pdo, 'parent', 'Loading things up, one moment please…');
-                nb_job_enqueue($pdo, 'interview');
-            }
+            // Under the lock, so two page loads at once can't both start the interview.
+            $empty = nb_locked($pdo, function () use ($pdo): bool {
+                $empty = (int)$pdo->query('SELECT COUNT(*) FROM chat')->fetchColumn() === 0
+                    && (int)$pdo->query('SELECT COUNT(*) FROM jobs')->fetchColumn() === 0;
+                if ($empty) {
+                    // Shown straight away: the agent's first real message takes a while (start-up, reading its files).
+                    nb_chat_add($pdo, 'parent', 'Loading things up, one moment please…');
+                    nb_job_enqueue($pdo, 'interview');
+                }
+                return $empty;
+            });
             respond(['ok' => true, 'started' => $empty]);
 
         default:

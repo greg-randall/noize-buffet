@@ -29,10 +29,17 @@ function nb_db(?string $path = null): PDO
     if (!is_dir(dirname($path))) {
         mkdir(dirname($path), 0777, true);
     }
-    $pdo = new PDO('sqlite:' . $path);
+    $pdo = new NbPdo('sqlite:' . $path);
+    $pdo->lockFile = "$path.lock";
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
     $pdo->exec('PRAGMA busy_timeout = 5000');
+    nb_locked($pdo, fn() => nb_create_tables($pdo));
+    return $pdo;
+}
+
+function nb_create_tables(PDO $pdo): void
+{
     foreach ([
         'CREATE TABLE IF NOT EXISTS songs (
             video_id TEXT PRIMARY KEY, artist TEXT, title TEXT, channel TEXT, duration_s REAL,
@@ -60,7 +67,77 @@ function nb_db(?string $path = null): PDO
     ] as $sql) {
         $pdo->exec($sql);
     }
-    return $pdo;
+}
+
+// ---------- locking ----------
+
+const NB_LOCK_WAIT_S = 30; // give up if another process holds the database lock this long
+
+/** A connection that knows its lock file (see nb_locked). */
+final class NbPdo extends PDO
+{
+    public string $lockFile = '';
+}
+
+/**
+ * Run $fn while holding this database's lock: an flock() on <db>.lock, held by one process at a time.
+ * Every database operation goes through here. SQLite's own locking between processes relies on POSIX file locks,
+ * which don't work on WSL's 9p mount of a Windows drive: writes and reads failed at once with "database is locked"
+ * or stalled for seconds (tests/test_db.php "concurrent writers" reproduces it). flock() does work there.
+ * Re-entrant: a function that already holds the lock can call others.
+ */
+function nb_locked(PDO $pdo, callable $fn): mixed
+{
+    static $held = []; // lock file => nesting depth
+    $file = $pdo instanceof NbPdo ? $pdo->lockFile : '';
+    if ($file === '' || isset($held[$file])) {
+        if ($file !== '') {
+            $held[$file]++;
+        }
+        try {
+            return $fn();
+        } finally {
+            if ($file !== '') {
+                $held[$file]--;
+            }
+        }
+    }
+    $h = fopen($file, 'c');
+    if ($h === false) {
+        throw new RuntimeException("can't open the database lock file $file");
+    }
+    $deadline = microtime(true) + NB_LOCK_WAIT_S;
+    while (!flock($h, LOCK_EX | LOCK_NB)) {
+        if (microtime(true) >= $deadline) {
+            fclose($h);
+            throw new RuntimeException('database busy: another process held the lock for ' . NB_LOCK_WAIT_S . ' seconds');
+        }
+        usleep(random_int(2000, 10000));
+    }
+    $held[$file] = 1;
+    try {
+        return $fn();
+    } finally {
+        unset($held[$file]);
+        flock($h, LOCK_UN);
+        fclose($h);
+    }
+}
+
+/** Run $fn in a write transaction (under the lock) and return its result. */
+function nb_write(PDO $pdo, callable $fn): mixed
+{
+    return nb_locked($pdo, function () use ($pdo, $fn) {
+        $pdo->exec('BEGIN IMMEDIATE');
+        try {
+            $result = $fn();
+            $pdo->exec('COMMIT');
+            return $result;
+        } catch (Throwable $e) {
+            $pdo->exec('ROLLBACK');
+            throw $e;
+        }
+    });
 }
 
 // ---------- songs and batches ----------
@@ -71,12 +148,11 @@ function nb_db(?string $path = null): PDO
  */
 function nb_add_batch(PDO $pdo, array $songs, string $summary, ?int $jobId): array
 {
-    $added = [];
-    $duplicates = [];
-    $invalid = [];
-    $now = nb_now();
-    $pdo->beginTransaction();
-    try {
+    return nb_write($pdo, function () use ($pdo, $songs, $summary, $jobId): array {
+        $added = [];
+        $duplicates = [];
+        $invalid = [];
+        $now = nb_now();
         $pdo->prepare('INSERT INTO batches (created_at, job_id, summary) VALUES (?, ?, ?)')->execute([$now, $jobId, $summary]);
         $batchId = (int)$pdo->lastInsertId();
         $exists = $pdo->prepare('SELECT COUNT(*) FROM songs WHERE video_id = ?');
@@ -109,28 +185,24 @@ function nb_add_batch(PDO $pdo, array $songs, string $summary, ?int $jobId): arr
             $pdo->prepare('DELETE FROM batches WHERE id = ?')->execute([$batchId]);
             $batchId = null;
         }
-        $pdo->commit();
-    } catch (Throwable $e) {
-        $pdo->rollBack();
-        throw $e;
-    }
-    return ['batch_id' => $batchId, 'added' => $added, 'duplicates' => $duplicates, 'invalid' => $invalid];
+        return ['batch_id' => $batchId, 'added' => $added, 'duplicates' => $duplicates, 'invalid' => $invalid];
+    });
 }
 
 /** Every song in the order it was added, with its listen data and batch summary. */
 function nb_queue(PDO $pdo): array
 {
-    return $pdo->query('SELECT s.*, l.furthest_pct, l.rating, l.notes, l.off_brief, l.new_to_me,
+    return nb_locked($pdo, fn() => $pdo->query('SELECT s.*, l.furthest_pct, l.rating, l.notes, l.off_brief, l.new_to_me,
             l.skipped, l.finished, l.first_played, l.last_played, b.summary AS batch_summary
         FROM songs s
         LEFT JOIN listens l ON l.video_id = s.video_id
         LEFT JOIN batches b ON b.id = s.batch_id
-        ORDER BY s.added_at, s.rowid')->fetchAll();
+        ORDER BY s.added_at, s.rowid')->fetchAll());
 }
 
 function nb_last_batch_at(PDO $pdo): ?string
 {
-    $v = $pdo->query('SELECT MAX(created_at) FROM batches')->fetchColumn();
+    $v = nb_locked($pdo, fn() => $pdo->query('SELECT MAX(created_at) FROM batches')->fetchColumn());
     return $v === false || $v === null ? null : (string)$v;
 }
 
@@ -138,9 +210,13 @@ function nb_last_batch_at(PDO $pdo): ?string
 
 function nb_listen(PDO $pdo, string $videoId): array
 {
-    $st = $pdo->prepare('SELECT * FROM listens WHERE video_id = ?');
-    $st->execute([$videoId]);
-    return $st->fetch() ?: [];
+    return nb_locked($pdo, function () use ($pdo, $videoId): array {
+        $st = $pdo->prepare('SELECT * FROM listens WHERE video_id = ?');
+        $st->execute([$videoId]);
+        $row = $st->fetch() ?: [];
+        $st->closeCursor();
+        return $row;
+    });
 }
 
 /** Merge $in into the song's listen row (rules in the spec); returns the saved row. */
@@ -150,18 +226,18 @@ function nb_save_listen(PDO $pdo, array $in): array
     if (!preg_match(NB_VIDEO_ID_RE, $vid)) {
         throw new InvalidArgumentException('video_id must be 11 characters [A-Za-z0-9_-]');
     }
-    $st = $pdo->prepare('SELECT COUNT(*) FROM songs WHERE video_id = ?');
-    $st->execute([$vid]);
-    if ((int)$st->fetchColumn() === 0) {
-        throw new InvalidArgumentException("unknown song $vid");
-    }
     $rating = $in['rating'] ?? null;
     if ($rating !== null && $rating !== '' && !in_array($rating, NB_RATINGS, true)) {
         throw new InvalidArgumentException('rating must be one of ' . implode(', ', NB_RATINGS));
     }
-
-    $pdo->beginTransaction();
-    try {
+    return nb_write($pdo, function () use ($pdo, $in, $vid, $rating): array {
+        $st = $pdo->prepare('SELECT COUNT(*) FROM songs WHERE video_id = ?');
+        $st->execute([$vid]);
+        $known = (int)$st->fetchColumn() > 0;
+        $st->closeCursor();
+        if (!$known) {
+            throw new InvalidArgumentException("unknown song $vid");
+        }
         $now = nb_now();
         $row = nb_listen($pdo, $vid) ?: [
             'video_id' => $vid, 'furthest_pct' => 0.0, 'rating' => null, 'notes' => null, 'notes_updated' => null,
@@ -174,9 +250,12 @@ function nb_save_listen(PDO $pdo, array $in): array
         if ($rating !== null && $rating !== '') {
             $row['rating'] = $rating;
         }
-        if (array_key_exists('notes', $in) && $in['notes'] !== null) {
-            $new = (string)$in['notes'];
-            $old = (string)($row['notes'] ?? '');
+        $old = (string)($row['notes'] ?? '');
+        $new = array_key_exists('notes', $in) && $in['notes'] !== null ? (string)$in['notes'] : null;
+        if (isset($in['append_notes'])) { // read and append inside this transaction, so concurrent notes aren't lost
+            $new = $old === '' ? (string)$in['append_notes'] : "$old\n{$in['append_notes']}";
+        }
+        if ($new !== null) {
             if ($new !== $old) {
                 $lastChanged = $row['notes_updated'] ? (int)strtotime((string)$row['notes_updated']) : 0;
                 if ($old !== '' && time() - $lastChanged > NB_NOTE_HISTORY_AFTER_S) {
@@ -208,12 +287,8 @@ function nb_save_listen(PDO $pdo, array $in): array
         if (isset($in['error']) && $in['error'] !== '') {
             $pdo->prepare('UPDATE songs SET unplayable_error = ? WHERE video_id = ?')->execute([(string)$in['error'], $vid]);
         }
-        $pdo->commit();
-    } catch (Throwable $e) {
-        $pdo->rollBack();
-        throw $e;
-    }
-    return nb_listen($pdo, $vid);
+        return nb_listen($pdo, $vid);
+    });
 }
 
 /** Append a note to a song's notes (never overwrites; old versions follow the note-history rule). */
@@ -223,8 +298,7 @@ function nb_append_note(PDO $pdo, string $videoId, string $text): array
     if ($text === '') {
         throw new InvalidArgumentException('note text is empty');
     }
-    $old = trim((string)(nb_listen($pdo, $videoId)['notes'] ?? ''));
-    return nb_save_listen($pdo, ['video_id' => $videoId, 'notes' => $old === '' ? $text : "$old\n$text"]);
+    return nb_save_listen($pdo, ['video_id' => $videoId, 'append_notes' => $text]);
 }
 
 /** Keep only the known fields of the "current song" the browser sends with a chat message. */
@@ -247,27 +321,33 @@ function nb_song_context(mixed $song): ?array
 /** Listens (with song info) changed after $since (ISO time), or all if $since is null. */
 function nb_feedback_since(PDO $pdo, ?string $since): array
 {
-    $st = $pdo->prepare('SELECT s.artist, s.title, s.bucket, s.reason, s.source, s.unplayable_error, l.*
-        FROM listens l JOIN songs s ON s.video_id = l.video_id
-        WHERE :since IS NULL OR l.last_played > :since
-        ORDER BY l.last_played');
-    $st->execute(['since' => $since]);
-    return $st->fetchAll();
+    return nb_locked($pdo, function () use ($pdo, $since): array {
+        $st = $pdo->prepare('SELECT s.artist, s.title, s.bucket, s.reason, s.source, s.unplayable_error, l.*
+            FROM listens l JOIN songs s ON s.video_id = l.video_id
+            WHERE :since IS NULL OR l.last_played > :since
+            ORDER BY l.last_played');
+        $st->execute(['since' => $since]);
+        return $st->fetchAll();
+    });
 }
 
 // ---------- chat ----------
 
 function nb_chat_add(PDO $pdo, string $role, string $text, ?int $jobId = null): int
 {
-    $pdo->prepare('INSERT INTO chat (role, text, created_at, job_id) VALUES (?, ?, ?, ?)')->execute([$role, $text, nb_now(), $jobId]);
-    return (int)$pdo->lastInsertId();
+    return nb_write($pdo, function () use ($pdo, $role, $text, $jobId): int {
+        $pdo->prepare('INSERT INTO chat (role, text, created_at, job_id) VALUES (?, ?, ?, ?)')->execute([$role, $text, nb_now(), $jobId]);
+        return (int)$pdo->lastInsertId();
+    });
 }
 
 function nb_chat_since(PDO $pdo, int $afterId): array
 {
-    $st = $pdo->prepare('SELECT * FROM chat WHERE id > ? ORDER BY id');
-    $st->execute([$afterId]);
-    return $st->fetchAll();
+    return nb_locked($pdo, function () use ($pdo, $afterId): array {
+        $st = $pdo->prepare('SELECT * FROM chat WHERE id > ? ORDER BY id');
+        $st->execute([$afterId]);
+        return $st->fetchAll();
+    });
 }
 
 // ---------- jobs ----------
@@ -277,16 +357,17 @@ function nb_job_enqueue(PDO $pdo, string $kind, array $payload = []): int
     if (!in_array($kind, NB_JOB_KINDS, true)) {
         throw new InvalidArgumentException("unknown job kind $kind");
     }
-    $pdo->prepare("INSERT INTO jobs (kind, status, payload, created_at) VALUES (?, 'queued', ?, ?)")
-        ->execute([$kind, json_encode($payload, JSON_UNESCAPED_UNICODE), nb_now()]);
-    return (int)$pdo->lastInsertId();
+    return nb_write($pdo, function () use ($pdo, $kind, $payload): int {
+        $pdo->prepare("INSERT INTO jobs (kind, status, payload, created_at) VALUES (?, 'queued', ?, ?)")
+            ->execute([$kind, json_encode($payload, JSON_UNESCAPED_UNICODE), nb_now()]);
+        return (int)$pdo->lastInsertId();
+    });
 }
 
 /** Take the oldest queued job and mark it running (atomic). */
 function nb_job_next(PDO $pdo): ?array
 {
-    $pdo->exec('BEGIN IMMEDIATE');
-    try {
+    return nb_write($pdo, function () use ($pdo): ?array {
         $job = $pdo->query("SELECT * FROM jobs WHERE status = 'queued' ORDER BY id LIMIT 1")->fetch();
         if ($job) {
             $now = nb_now();
@@ -295,61 +376,63 @@ function nb_job_next(PDO $pdo): ?array
             $job['started_at'] = $now;
             $job['id'] = (int)$job['id'];
         }
-        $pdo->exec('COMMIT');
-    } catch (Throwable $e) {
-        $pdo->exec('ROLLBACK');
-        throw $e;
-    }
-    return $job ?: null;
+        return $job ?: null;
+    });
 }
 
 function nb_job_finish(PDO $pdo, int $id, bool $ok, ?string $result, ?string $error, ?string $sessionId): void
 {
-    $pdo->prepare('UPDATE jobs SET status = ?, result = ?, error = ?, session_id = ?, finished_at = ? WHERE id = ?')
-        ->execute([$ok ? 'done' : 'failed', $result, $error, $sessionId, nb_now(), $id]);
+    nb_write($pdo, fn() => $pdo->prepare('UPDATE jobs SET status = ?, result = ?, error = ?, session_id = ?, finished_at = ? WHERE id = ?')
+        ->execute([$ok ? 'done' : 'failed', $result, $error, $sessionId, nb_now(), $id]));
 }
 
 /** Jobs still marked running when the worker starts were interrupted (e.g. Ctrl+C); mark them failed and say so. */
 function nb_jobs_recover_interrupted(PDO $pdo): int
 {
-    $ids = $pdo->query("SELECT id FROM jobs WHERE status = 'running'")->fetchAll(PDO::FETCH_COLUMN);
-    foreach ($ids as $id) {
-        nb_job_finish($pdo, (int)$id, false, null, 'interrupted: the worker stopped while this job was running', null);
-        nb_chat_add($pdo, 'system', "The agent was stopped in the middle of job $id. Send your message again if you still need it.", (int)$id);
-    }
-    return count($ids);
+    return nb_locked($pdo, function () use ($pdo): int {
+        $ids = $pdo->query("SELECT id FROM jobs WHERE status = 'running'")->fetchAll(PDO::FETCH_COLUMN);
+        foreach ($ids as $id) {
+            nb_job_finish($pdo, (int)$id, false, null, 'interrupted: the worker stopped while this job was running', null);
+            nb_chat_add($pdo, 'system', "The agent was stopped in the middle of job $id. Send your message again if you still need it.", (int)$id);
+        }
+        return count($ids);
+    });
 }
 
 function nb_job_status(PDO $pdo): array
 {
-    $running = $pdo->query("SELECT id, kind, started_at FROM jobs WHERE status = 'running' ORDER BY id LIMIT 1")->fetch();
-    if ($running) {
-        $running['id'] = (int)$running['id'];
-        // What the agent is doing right now, written by the worker as tool calls stream in.
-        $activity = json_decode((string)nb_setting($pdo, 'agent_activity'), true);
-        $running['activity'] = ($activity['job'] ?? null) === $running['id'] ? $activity['text'] : null;
-    }
-    $queued = (int)$pdo->query("SELECT COUNT(*) FROM jobs WHERE status = 'queued'")->fetchColumn();
-    return ['running' => $running ?: null, 'queued' => $queued];
+    return nb_locked($pdo, function () use ($pdo): array {
+        $running = $pdo->query("SELECT id, kind, started_at FROM jobs WHERE status = 'running' ORDER BY id LIMIT 1")->fetch();
+        if ($running) {
+            $running['id'] = (int)$running['id'];
+            // What the agent is doing right now, written by the worker as tool calls stream in.
+            $activity = json_decode((string)nb_setting($pdo, 'agent_activity'), true);
+            $running['activity'] = ($activity['job'] ?? null) === $running['id'] ? $activity['text'] : null;
+        }
+        $queued = (int)$pdo->query("SELECT COUNT(*) FROM jobs WHERE status = 'queued'")->fetchColumn();
+        return ['running' => $running ?: null, 'queued' => $queued];
+    });
 }
 
 // ---------- settings and mutes ----------
 
 function nb_setting(PDO $pdo, string $key, ?string $default = null): ?string
 {
-    $st = $pdo->prepare('SELECT value FROM settings WHERE key = ?');
-    $st->execute([$key]);
-    $v = $st->fetchColumn();
+    $v = nb_locked($pdo, function () use ($pdo, $key) {
+        $st = $pdo->prepare('SELECT value FROM settings WHERE key = ?');
+        $st->execute([$key]);
+        $v = $st->fetchColumn();
+        $st->closeCursor();
+        return $v;
+    });
     return $v === false || $v === null ? $default : (string)$v;
 }
 
 function nb_setting_set(PDO $pdo, string $key, ?string $value): void
 {
-    if ($value === null) {
-        $pdo->prepare('DELETE FROM settings WHERE key = ?')->execute([$key]);
-        return;
-    }
-    $pdo->prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')->execute([$key, $value]);
+    nb_write($pdo, fn() => $value === null
+        ? $pdo->prepare('DELETE FROM settings WHERE key = ?')->execute([$key])
+        : $pdo->prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')->execute([$key, $value]));
 }
 
 function nb_mute_add(PDO $pdo, string $kind, string $value): int
@@ -357,11 +440,13 @@ function nb_mute_add(PDO $pdo, string $kind, string $value): int
     if (!in_array($kind, NB_MUTE_KINDS, true) || trim($value) === '') {
         throw new InvalidArgumentException('mute needs kind ' . implode('/', NB_MUTE_KINDS) . ' and a value');
     }
-    $pdo->prepare('INSERT INTO mutes (kind, value, created_at) VALUES (?, ?, ?)')->execute([$kind, trim($value), nb_now()]);
-    return (int)$pdo->lastInsertId();
+    return nb_write($pdo, function () use ($pdo, $kind, $value): int {
+        $pdo->prepare('INSERT INTO mutes (kind, value, created_at) VALUES (?, ?, ?)')->execute([$kind, trim($value), nb_now()]);
+        return (int)$pdo->lastInsertId();
+    });
 }
 
 function nb_mutes(PDO $pdo): array
 {
-    return $pdo->query('SELECT * FROM mutes ORDER BY id')->fetchAll();
+    return nb_locked($pdo, fn() => $pdo->query('SELECT * FROM mutes ORDER BY id')->fetchAll());
 }

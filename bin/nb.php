@@ -115,18 +115,21 @@ try {
             out(nb_mutes($pdo));
 
         case 'status':
-            out([
+            out(nb_locked($pdo, fn() => [
                 'songs' => (int)$pdo->query('SELECT COUNT(*) FROM songs')->fetchColumn(),
                 'unplayed' => (int)$pdo->query('SELECT COUNT(*) FROM songs s LEFT JOIN listens l ON l.video_id = s.video_id
                     WHERE l.video_id IS NULL AND s.unplayable_error IS NULL')->fetchColumn(),
                 'rated' => (int)$pdo->query('SELECT COUNT(*) FROM listens WHERE rating IS NOT NULL')->fetchColumn(),
                 'last_batch_at' => nb_last_batch_at($pdo),
                 'jobs' => nb_job_status($pdo),
-            ]);
+            ]));
 
         default:
             out(['usage' => NB_USAGE], $cmd === 'help' ? 0 : 2);
     }
 } catch (InvalidArgumentException $e) {
     out(['ok' => false, 'error' => $e->getMessage()], 2);
+} catch (Throwable $e) {
+    // Anything else (e.g. the database being busy): still answer in JSON and log it, rather than crash silently.
+    out(['ok' => false, 'error' => get_class($e) . ': ' . $e->getMessage()], 1);
 }

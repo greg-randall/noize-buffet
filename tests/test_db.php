@@ -117,4 +117,38 @@ try { nb_chat_add($b, 'parent', 'written by another connection'); } catch (PDOEx
 check($wrote, 'another connection can write after status/next/listen reads');
 check(count(nb_chat_since($a, 0)) === $before + 1, 'the first connection sees the new row');
 
+echo "concurrent writers\n";
+// Regression: writes from several processes at once (the page saving while the agent adds a note) must wait for
+// each other, not fail with "database is locked".
+$path = tmp_dir() . '/test_db_writers.sqlite';
+@unlink($path);
+nb_add_batch(nb_db($path), [['video_id' => 'WWWWWWWWWWW', 'title' => 'W', 'bucket' => 'close']], 'writers', null);
+$procs = [];
+foreach (range(1, 3) as $n) {
+    $procs[] = proc_open([PHP_BINARY, __DIR__ . '/concurrent_writer.php', $path, 'WWWWWWWWWWW', '30'], [1 => ['pipe', 'w']], $pipes[$n]);
+}
+// And a reader polling like the chat panel does, the whole time.
+$reader = proc_open([PHP_BINARY, __DIR__ . '/concurrent_reader.php', $path, '8'], [1 => ['pipe', 'w']], $readerPipes);
+$ok = 0;
+$errors = [];
+foreach ($procs as $i => $p) {
+    $r = json_decode((string)stream_get_contents($pipes[$i + 1][1]), true);
+    proc_close($p);
+    $ok += $r['ok'] ?? 0;
+    $errors = array_merge($errors, $r['errors'] ?? ['writer crashed']);
+}
+if ($errors) {
+    echo '    ' . count($errors) . ' errors, e.g. ' . $errors[0] . "\n";
+}
+check($ok === 90 && $errors === [], 'three processes writing at once: every write succeeds');
+$r = json_decode((string)stream_get_contents($readerPipes[1]), true);
+proc_close($reader);
+if ($r['errors'] ?? ['reader crashed']) {
+    echo '    reader: ' . count($r['errors'] ?? []) . ' errors of ' . (($r['ok'] ?? 0) + count($r['errors'] ?? [])) . ' polls, e.g. '
+        . (($r['errors'] ?? ['reader crashed'])[0]) . "\n";
+}
+check(($r['errors'] ?? null) === [] && $r['ok'] > 0, 'a reader polling at the same time never fails');
+$notes = explode("\n", (string)nb_listen(nb_db($path), 'WWWWWWWWWWW')['notes']);
+check(count($notes) === 45, 'no note lost when notes are appended at the same time (' . count($notes) . ' of 45)');
+
 finish();
