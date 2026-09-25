@@ -31,6 +31,13 @@ fwrite(STDERR, '[' . nb_now() . "] job worker started (model {$config['parent_mo
 while (true) {
     $job = nb_job_next($pdo);
     if ($job === null) {
+        // Idle: top the queue up before it runs out, so the user doesn't have to ask.
+        $refill = nb_refill_check($pdo, (int)$config['refill_when_left']);
+        if ($refill['refill']) {
+            $id = nb_job_enqueue($pdo, 'refill', ['unplayed' => $refill['unplayed']]);
+            fwrite(STDERR, '[' . nb_now() . "] queue running low ({$refill['why']}): queued refill job $id\n");
+            continue;
+        }
         if ($once) {
             $parent->stop();
             exit(0);

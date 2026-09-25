@@ -45,6 +45,8 @@ Then write `brief.md` (their goal in their words) and the first `taste.md`, add 
 
 ## Building a batch
 
+You build a batch when the user asks for more songs, and on **automatic refills**: the worker sends you an "Automatic refill" message when only a few unplayed songs are left. For a refill, don't ask the user anything first; just build the batch (heads-up message included) and summarise it.
+
 A batch takes a few minutes, so first tell the user it's started: `php bin/nb.php say "Got it, building a batch now. This usually takes a few minutes."` (in your own words). You may post one short progress note partway through, such as "Found some good leads on Bandcamp, checking the YouTube links…". Your final reply still summarises the batch.
 
 1. Read `taste.md`, `brief.md`, `config.json`, `php bin/nb.php feedback` and `php bin/nb.php mutes`.

@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 const NB_RATINGS = ['top', 'yes', 'good', 'ok', 'meh', 'no'];
 const NB_BUCKETS = ['close', 'lead', 'wildcard', 'user'];
-const NB_JOB_KINDS = ['interview', 'chat'];
+const NB_JOB_KINDS = ['interview', 'chat', 'refill'];
 const NB_MUTE_KINDS = ['artist', 'lane'];
 const NB_NOTE_HISTORY_AFTER_S = 600; // keep an old note only if last changed 10+ minutes ago
 const NB_VIDEO_ID_RE = '/^[A-Za-z0-9_-]{11}$/';
@@ -411,6 +411,55 @@ function nb_job_status(PDO $pdo): array
         }
         $queued = (int)$pdo->query("SELECT COUNT(*) FROM jobs WHERE status = 'queued'")->fetchColumn();
         return ['running' => $running ?: null, 'queued' => $queued];
+    });
+}
+
+/** Songs not played yet (and not known to be unplayable): what's left in the queue. */
+function nb_unplayed_count(PDO $pdo): int
+{
+    return nb_locked($pdo, fn() => (int)$pdo->query('SELECT COUNT(*) FROM songs s LEFT JOIN listens l ON l.video_id = s.video_id
+        WHERE l.video_id IS NULL AND s.unplayable_error IS NULL')->fetchColumn());
+}
+
+/**
+ * Whether the worker should queue a refill now, and why not if it shouldn't.
+ * Returns ['refill' => bool, 'unplayed' => int, 'why' => string].
+ * Refill when at most $threshold songs are left, but only if: $threshold > 0 (0 turns it off); the first batch exists
+ * (the interview is done); no job is queued or running (chat goes first, and a batch may already be on its way);
+ * and, if no batch has arrived since the last refill, the user has played a new song since it (so a refill that
+ * added nothing isn't retried in a loop) and the last two refills didn't both fail.
+ */
+function nb_refill_check(PDO $pdo, int $threshold): array
+{
+    return nb_locked($pdo, function () use ($pdo, $threshold): array {
+        $unplayed = nb_unplayed_count($pdo);
+        $no = fn(string $why) => ['refill' => false, 'unplayed' => $unplayed, 'why' => $why];
+        if ($threshold <= 0) {
+            return $no('auto-refill is off (refill_when_left is 0)');
+        }
+        if ($unplayed > $threshold) {
+            return $no("$unplayed songs left");
+        }
+        if (nb_last_batch_at($pdo) === null) {
+            return $no('no batch yet (interview not finished)');
+        }
+        $jobs = nb_job_status($pdo);
+        if ($jobs['running'] || $jobs['queued'] > 0) {
+            return $no('the agent is busy');
+        }
+        $refills = $pdo->query("SELECT status, payload, created_at FROM jobs WHERE kind = 'refill' ORDER BY id DESC LIMIT 2")->fetchAll();
+        // A batch since the last refill means the normal cycle: fine to go again. Otherwise the last refill added
+        // nothing or failed; only retry once they've played a song that was still new then (fewer unplayed now).
+        if ($refills && nb_last_batch_at($pdo) < $refills[0]['created_at']) {
+            if (count($refills) === 2 && $refills[0]['status'] === 'failed' && $refills[1]['status'] === 'failed') {
+                return $no('paused: the last two refills failed; ask for songs in the chat to restart');
+            }
+            $then = (int)(json_decode((string)$refills[0]['payload'], true)['unplayed'] ?? 0);
+            if ($unplayed >= $then) {
+                return $no('the last refill added nothing and no new song has been played since');
+            }
+        }
+        return ['refill' => true, 'unplayed' => $unplayed, 'why' => "$unplayed songs left"];
     });
 }
 

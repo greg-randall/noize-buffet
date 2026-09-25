@@ -19,6 +19,12 @@ function nb_parent_prompt(array $job, bool $newSession): string
         : '';
     $sent = strtotime((string)($job['created_at'] ?? '')) ?: time();
     $intro .= sprintf("(Sent at %s, unix %d.)\n\n", gmdate('Y-m-d H:i', $sent) . ' UTC', $sent);
+    if ($job['kind'] === 'refill') {
+        $payload = json_decode((string)($job['payload'] ?? ''), true) ?: [];
+        return $intro . sprintf('Automatic refill: the queue is running low (%d unplayed songs left). ', (int)($payload['unplayed'] ?? 0))
+            . 'Build the next batch now, following "Building a batch" in CLAUDE.md, without asking the user first. '
+            . 'Your final reply is shown to them in the chat panel.';
+    }
     if ($job['kind'] === 'interview') {
         return $intro . 'The user just opened the web UI for the first time. Start the interview described in CLAUDE.md with your first question.';
     }
@@ -169,7 +175,7 @@ function nb_run_parent_job(PDO $pdo, array $job, array $config, NbParentProcess 
     $prompt = nb_parent_prompt($job, $sid === null);
 
     // Keep the chat panel's "what is the agent doing" line current, then pass the event on.
-    nb_set_activity($pdo, $jobId, $job['kind'] === 'interview' ? 'Getting ready' : 'Reading your message');
+    nb_set_activity($pdo, $jobId, ['interview' => 'Getting ready', 'refill' => 'Planning the next batch'][$job['kind']] ?? 'Reading your message');
     $events = function (array $event) use ($pdo, $jobId, $onEvent): void {
         foreach (($event['type'] ?? '') === 'assistant' ? $event['message']['content'] ?? [] : [] as $block) {
             $text = ($block['type'] ?? '') === 'tool_use' ? nb_activity_text((string)$block['name'], $block['input'] ?? []) : null;

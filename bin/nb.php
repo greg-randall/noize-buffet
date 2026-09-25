@@ -117,8 +117,7 @@ try {
         case 'status':
             out(nb_locked($pdo, fn() => [
                 'songs' => (int)$pdo->query('SELECT COUNT(*) FROM songs')->fetchColumn(),
-                'unplayed' => (int)$pdo->query('SELECT COUNT(*) FROM songs s LEFT JOIN listens l ON l.video_id = s.video_id
-                    WHERE l.video_id IS NULL AND s.unplayable_error IS NULL')->fetchColumn(),
+                'unplayed' => nb_unplayed_count($pdo),
                 'rated' => (int)$pdo->query('SELECT COUNT(*) FROM listens WHERE rating IS NOT NULL')->fetchColumn(),
                 'last_batch_at' => nb_last_batch_at($pdo),
                 'jobs' => nb_job_status($pdo),

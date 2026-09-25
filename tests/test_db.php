@@ -151,4 +151,44 @@ check(($r['errors'] ?? null) === [] && $r['ok'] > 0, 'a reader polling at the sa
 $notes = explode("\n", (string)nb_listen(nb_db($path), 'WWWWWWWWWWW')['notes']);
 check(count($notes) === 45, 'no note lost when notes are appended at the same time (' . count($notes) . ' of 45)');
 
+echo "auto-refill check\n";
+$path = tmp_dir() . '/test_db_refill.sqlite';
+@unlink($path);
+$r = nb_db($path);
+$song = fn(string $id) => ['video_id' => $id, 'title' => "Song $id", 'bucket' => 'close'];
+$past = fn(string $sql) => $r->exec($sql); // move timestamps back: they have 1-second resolution
+check(nb_refill_check($r, 5)['why'] === 'no batch yet (interview not finished)', 'no refill before the first batch');
+nb_add_batch($r, [$song('R0000000001'), $song('R0000000002'), $song('R0000000003')], 'first', null);
+$past("UPDATE batches SET created_at = '2001-01-01T00:00:00Z'");
+$c = nb_refill_check($r, 5);
+check($c['refill'] === true && $c['unplayed'] === 3, 'refill when 3 songs are left and the threshold is 5');
+check(nb_refill_check($r, 2)['refill'] === false, 'no refill while more songs are left than the threshold');
+check(nb_refill_check($r, 0)['refill'] === false, 'refill_when_left 0 turns it off');
+$chat = nb_job_enqueue($r, 'chat', ['message' => 'hi']);
+check(nb_refill_check($r, 5)['why'] === 'the agent is busy', 'no refill while a job is queued');
+nb_job_finish($r, (int)nb_job_next($r)['id'], true, 'ok', null, null);
+
+// A refill that added nothing: don't go again until they've played a song that was new then.
+$ref = nb_job_enqueue($r, 'refill', ['unplayed' => 3]);
+nb_job_finish($r, (int)nb_job_next($r)['id'], true, 'ok', null, null);
+$past("UPDATE jobs SET created_at = '2002-01-01T00:00:00Z' WHERE id = $ref");
+check(str_contains(nb_refill_check($r, 5)['why'], 'added nothing'), 'no retry loop after a refill that added nothing');
+nb_save_listen($r, ['video_id' => 'R0000000001', 'furthest_pct' => 50]);
+check(nb_refill_check($r, 5)['refill'] === true, 'retry once a new song has been played');
+
+// Normal cycle: a batch arrived after the refill, so the next refill is fine once the queue runs low again.
+nb_add_batch($r, [$song('R0000000004')], 'from the refill', null);
+check(nb_refill_check($r, 5)['refill'] === true, 'refill again after a refill that added songs');
+
+// Two failed refills in a row with no batch since: pause.
+$past("UPDATE batches SET created_at = '2001-01-01T00:00:00Z'");
+foreach ([1, 2] as $n) {
+    $f = nb_job_enqueue($r, 'refill', ['unplayed' => 3]);
+    nb_job_finish($r, (int)nb_job_next($r)['id'], false, null, 'boom', null);
+}
+nb_save_listen($r, ['video_id' => 'R0000000002', 'furthest_pct' => 50]);
+check(str_contains(nb_refill_check($r, 5)['why'], 'paused'), 'pause after two failed refills');
+nb_add_batch($r, [$song('R0000000005')], 'asked for in chat', null);
+check(nb_refill_check($r, 5)['refill'] === true, 'a new batch lifts the pause');
+
 finish();

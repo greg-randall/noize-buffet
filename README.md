@@ -2,7 +2,7 @@
 
 A music suggestion queue that an AI agent fills with new songs for your taste, running entirely on your own machine.
 
-You chat with an AI agent in a local web page. It asks what you're after, then adds a batch of YouTube songs to a queue, and another whenever you ask for more. You listen in the embedded player. It records how far you got, your rating, your notes and whether a song was new to you, and the agent uses all of that when it picks the next batch.
+You chat with an AI agent in a local web page. It asks what you're after, then adds a batch of YouTube songs to a queue, and another whenever the queue runs low or you ask for more. You listen in the embedded player. It records how far you got, your rating, your notes and whether a song was new to you, and the agent uses all of that when it picks the next batch.
 
 ![noize-buffet: the player, song details and ratings on the left with the playlist below, and the chat with the agent on the right](screenshot.webp)
 
@@ -41,7 +41,7 @@ flowchart LR
 2. Before choosing a batch, the agent researches the songs you like on the web (at first, the ones you named): their labels and the other artists on them, their producers and collaborators, similar-artist pages, and the scenes around them. A single person's recommendation needs a second, independent signal before it counts. The agent finds each song on YouTube with `yt_search.py` and adds about 12 to the queue: mostly songs close to what you like, some from artists, labels and scenes it turned up while researching, and one wildcard that tests an edge of your taste. Each song records why it's there and the page that led to it.
 3. The page plays the queue. For each song it records how far you got, your rating (top, yes, good, ok, meh, no), whether it was new to you, and whether it's good but not what you're looking for ("off-brief").
 4. You tell the agent what you think of the song that's playing ("love the drums", "the vocals are generic"). It saves your comment as a note on that song, fills in the rating and toggles your comment implies (you can change them), and updates `taste.md`. You can also paste a song you found, ask for more songs, or ask it to stop suggesting an artist.
-5. For the next batch, the agent reads your ratings, notes and chat since the last one, and reuses the artists, labels and scenes it has already found.
+5. When only `refill_when_left` unplayed songs are left (5 by default), the worker asks the agent for the next batch, so the queue doesn't run out. You can also ask for more songs in the chat at any time. For each new batch, the agent reads your ratings, notes and chat since the last one, and reuses the artists, labels and scenes it has already found.
 
 While the agent works, the chat shows what it's doing ("Searching YouTube (12 songs)…", "Reading bandcamp.com…").
 
@@ -59,13 +59,13 @@ On one measured run, chat replies took about 8 seconds and a first batch with we
 
 ### Not built yet
 
-Batches don't refill on their own when the queue runs low yet, so for now ask the agent for more songs. Mining the YouTube comments of songs you love for new leads is also still to come.
+Mining the YouTube comments of songs you love for new leads.
 
 ## Where things live
 
 - `brief.md`, `taste.md`: what you're after and what the agent has learned. You can edit both; the agent treats your edits as things you said.
 - `data/music.sqlite`: your queue, listening history, notes and chat (never committed)
-- `config.json`: `batch_size`; `mix` (share of close, lead and wildcard songs); `parent_model` (the Claude model the agent uses); `memory_picks` (most songs per batch the agent may suggest from its own memory rather than research); `session_rotate_turns`; `job_timeout_s`
+- `config.json`: `batch_size`; `mix` (share of close, lead and wildcard songs); `parent_model` (the Claude model the agent uses); `memory_picks` (most songs per batch the agent may suggest from its own memory rather than research); `refill_when_left` (unplayed songs left when a new batch is started automatically; 0 turns it off); `session_rotate_turns`; `job_timeout_s`
 - `CLAUDE.md`: the agent's rulebook
 - `player/`: the web page; `scripts/job_worker.php`: the worker; `bin/nb.php`: the agent's database commands; `scripts/yt_search.py`: YouTube search; `lib/`: shared PHP
 

@@ -89,6 +89,11 @@ $p = $lastInput();
 check(str_contains($p, 'currently listening to: Some Artist - Some Song [video_id AAAAAAAAAAA]') && str_contains($p, 'heard 64%')
     && str_contains($p, 'rating: yes') && str_contains($p, 'new to them') && str_contains($p, 'love the drums'), 'prompt carries the current song');
 
+echo "refill prompt\n";
+nb_job_enqueue($pdo, 'refill', ['unplayed' => 4]);
+nb_run_parent_job($pdo, nb_job_next($pdo), $config, $parent);
+check(str_contains($lastInput(), 'Automatic refill') && str_contains($lastInput(), '4 unplayed songs left'), 'refill prompt says why and how many are left');
+
 echo "interview prompt\n";
 nb_job_enqueue($pdo, 'interview');
 nb_run_parent_job($pdo, nb_job_next($pdo), $config, $parent);

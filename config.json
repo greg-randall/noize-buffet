@@ -4,5 +4,6 @@
   "parent_model": "sonnet",
   "session_rotate_turns": 40,
   "job_timeout_s": 600,
-  "memory_picks": 2
+  "memory_picks": 2,
+  "refill_when_left": 5
 }
