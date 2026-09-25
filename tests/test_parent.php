@@ -11,7 +11,7 @@ chmod(__DIR__ . '/fake_claude.sh', 0755);
 putenv('NB_CLAUDE_BIN=' . __DIR__ . '/fake_claude.sh');
 putenv("NB_FAKE_ARGS=$argsFile");
 $config = ['parent_model' => 'sonnet', 'session_rotate_turns' => 3] + nb_config();
-$args = fn() => file($argsFile, FILE_IGNORE_NEW_LINES);
+$args = fn() => explode("\0", rtrim((string)file_get_contents($argsFile), "\0"));
 
 echo "first job: new session\n";
 nb_chat_add($pdo, 'user', 'hi there');

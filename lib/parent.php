@@ -8,14 +8,14 @@ function nb_parent_prompt(array $job, bool $newSession): string
 {
     $intro = $newSession
         ? "You are the noize-buffet parent agent. First read CLAUDE.md in the current directory and follow it "
-          . "for this whole conversation. Then read brief.md and taste.md if they exist. "
+          . "for this whole conversation. Then read brief.md and taste.md if they exist.\n\n"
         : '';
     if ($job['kind'] === 'interview') {
         return $intro . 'The user just opened the web UI for the first time. Start the interview described in CLAUDE.md with your first question.';
     }
     $payload = json_decode((string)($job['payload'] ?? ''), true) ?: [];
     $message = trim((string)($payload['message'] ?? ''));
-    return $intro . "Message from the user in the web UI chat: $message Your final reply is shown to them in the chat panel.";
+    return $intro . "Message from the user in the web UI chat:\n\n$message\n\nYour final reply is shown to them in the chat panel.";
 }
 
 function nb_parent_command(string $prompt, ?string $sessionId, array $config): array
