@@ -78,14 +78,27 @@ function renderRow(idx) {
   $tr.find('.rating').text(s.rating || '');
   $tr.find('.heard').text(s.unplayable_error ? 'err ' + s.unplayable_error
     : (s.furthest_pct != null ? Math.round(s.furthest_pct) + '%' : ''));
-  $tr.toggleClass('table-active', idx === state.i);
+  const current = idx === state.i;
+  $tr.toggleClass('table-active', current);
+  $tr.find('.num').text(current ? '▶' : idx + 1).attr('title', current ? 'Now playing' : null);
+}
+
+// Highlight the current song (▶ in place of its number); with scroll, move the playlist so it sits at the top.
+function markCurrent(scroll) {
+  state.songs.forEach((_, idx) => renderRow(idx));
+  if (!scroll) return;
+  const tr = document.querySelector(`#queue-list tr[data-idx="${state.i}"]`);
+  const box = document.getElementById('queue-scroll');
+  if (!tr || !box) return;
+  const header = box.querySelector('thead').offsetHeight;
+  box.scrollTo({top: Math.max(0, tr.offsetTop - header), behavior: 'smooth'});
 }
 
 function renderQueue() {
   const $tb = $('#queue-list').empty();
   state.songs.forEach((s, idx) => {
     $('<tr>').attr('data-idx', idx).append(
-      $('<td>').text(idx + 1), $('<td>').text(s.artist), $('<td>').text(s.title),
+      $('<td class="num">'), $('<td>').text(s.artist), $('<td>').text(s.title),
       $('<td class="small text-secondary">').text(s.batch_summary || ''),
       $('<td class="rating">'), $('<td class="heard">')).appendTo($tb);
     renderRow(idx);
@@ -105,7 +118,7 @@ function refreshQueue(initial) {
       if (songs.length) loadSong(first === -1 ? 0 : first, false, false);
     } else {
       state.i = Math.max(0, songs.findIndex(s => s.video_id === currentId));
-      renderRow(state.i);
+      markCurrent(false); // don't jump the playlist while they may be scrolling through it
       $('#position').text(`Song ${state.i + 1} of ${songs.length}`);
     }
   }).fail(xhr => connError('loading the queue', xhr));
@@ -143,8 +156,7 @@ function loadSong(idx, autoplay, byUser) {
   renderSongControls();
   $('#unavailable').addClass('d-none');
   $('#position').text(`Song ${idx + 1} of ${state.songs.length}`);
-  $('#queue-list tr').removeClass('table-active');
-  $(`#queue-list tr[data-idx="${idx}"]`).addClass('table-active');
+  markCurrent(true);
   showProgress();
   cueOrLoad(s.video_id, autoplay);
 }
