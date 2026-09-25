@@ -309,6 +309,17 @@ function nb_job_finish(PDO $pdo, int $id, bool $ok, ?string $result, ?string $er
         ->execute([$ok ? 'done' : 'failed', $result, $error, $sessionId, nb_now(), $id]);
 }
 
+/** Jobs still marked running when the worker starts were interrupted (e.g. Ctrl+C); mark them failed and say so. */
+function nb_jobs_recover_interrupted(PDO $pdo): int
+{
+    $ids = $pdo->query("SELECT id FROM jobs WHERE status = 'running'")->fetchAll(PDO::FETCH_COLUMN);
+    foreach ($ids as $id) {
+        nb_job_finish($pdo, (int)$id, false, null, 'interrupted: the worker stopped while this job was running', null);
+        nb_chat_add($pdo, 'system', "The agent was stopped in the middle of job $id. Send your message again if you still need it.", (int)$id);
+    }
+    return count($ids);
+}
+
 function nb_job_status(PDO $pdo): array
 {
     $running = $pdo->query("SELECT id, kind, started_at FROM jobs WHERE status = 'running' ORDER BY id LIMIT 1")->fetch();

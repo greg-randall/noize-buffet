@@ -8,6 +8,10 @@ require dirname(__DIR__) . '/lib/parent.php';
 $once = in_array('--once', $argv, true);
 $pdo = nb_db();
 $config = nb_config();
+$interrupted = nb_jobs_recover_interrupted($pdo);
+if ($interrupted > 0) {
+    fwrite(STDERR, '[' . nb_now() . "] marked $interrupted interrupted job(s) as failed\n");
+}
 fwrite(STDERR, '[' . nb_now() . "] job worker started (model {$config['parent_model']})\n");
 
 while (true) {

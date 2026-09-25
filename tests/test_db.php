@@ -93,6 +93,15 @@ check(nb_setting($pdo, 'k') === null, 'setting cleared');
 nb_mute_add($pdo, 'artist', 'Some Band');
 check(nb_mutes($pdo)[0]['value'] === 'Some Band', 'mute stored');
 
+echo "interrupted jobs\n";
+$ij = nb_job_enqueue($pdo, 'chat', ['message' => 'x']);
+$pdo->exec("UPDATE jobs SET status = 'queued' WHERE status = 'running'");
+while (($j = nb_job_next($pdo)) !== null && $j['id'] !== $ij) { nb_job_finish($pdo, $j['id'], true, '', null, null); }
+check(nb_jobs_recover_interrupted($pdo) === 1, 'running job recovered on startup');
+check($pdo->query("SELECT status FROM jobs WHERE id = $ij")->fetchColumn() === 'failed' && nb_job_status($pdo)['running'] === null, 'marked failed, nothing left running');
+$msgs = nb_chat_since($pdo, 0);
+check(str_contains(end($msgs)['text'], "job $ij"), 'user told about the interrupted job');
+
 echo "concurrent connections\n";
 // Regression: a single-row fetch must not leave its cursor open. An open cursor keeps a read lock,
 // so this connection kept seeing a stale snapshot and other processes couldn't write (long-poll bug).
