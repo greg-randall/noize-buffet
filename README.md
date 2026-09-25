@@ -29,8 +29,9 @@ It checks the requirements, creates `.env` if needed, starts the web server and 
 
 ## When something goes wrong
 
-- **Worker terminal**: one line per job with status, time, turns and API-equivalent cost; `BLOCKED:` lines if the agent tried a tool it isn't allowed; the path to the job's debug file.
-- `data/jobs/<id>.json`: everything about one agent job: prompt, command, exit code, duration, blocked tools, raw output, and the path to Claude Code's full transcript of the conversation.
+- **Worker terminal**: a `tool:` line for each tool the agent calls, as it happens; then one line per job with status, time, turns, API-equivalent cost and whether the agent process was started or reused; `BLOCKED:` lines if the agent tried a tool it isn't allowed; the path to the job's debug file.
+- `data/jobs/<id>.json`: everything about one agent job: prompt, the agent process's pid and command, duration, blocked tools, every event the agent streamed back, and the path to Claude Code's full transcript of the conversation.
+- The agent is one long-lived `claude` process, so replies after the first skip Claude Code's start-up time. It is restarted after `session_rotate_turns` messages, after any error, and when a job takes longer than `job_timeout_s` (config.json).
 - `data/nb.log`: every database command the agent ran, with its exact input and output (one JSON object per line).
 - `data/parent-stderr.log`: anything `claude` printed to stderr.
 - `data/api-errors.log`: server-side errors from the web UI, with stack traces.

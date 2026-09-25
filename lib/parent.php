@@ -1,9 +1,12 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/isolation.php';
+require_once __DIR__ . '/parent_process.php';
 
 // Tools the parent may use without asking. Bash is limited to the two helper scripts.
 const NB_PARENT_TOOLS = 'Read Edit Write WebSearch WebFetch Bash(php bin/nb.php *) Bash(python3 scripts/yt_search.py *)';
+// The only built-in tools the parent has at all (drops Task, Cron, Glob, etc.).
+const NB_PARENT_BUILTIN_TOOLS = 'Read,Edit,Write,WebSearch,WebFetch,Bash';
 
 function nb_parent_prompt(array $job, bool $newSession): string
 {
@@ -32,12 +35,15 @@ function nb_parent_prompt(array $job, bool $newSession): string
     return $intro . "Message from the user in the web UI chat:\n\n$context$message\n\nYour final reply is shown to them in the chat panel.";
 }
 
-function nb_parent_command(string $prompt, ?string $sessionId, array $config): array
+/** The command for a long-lived parent process that reads messages as JSON lines on stdin (see NbParentProcess). */
+function nb_parent_command(?string $sessionId, array $config): array
 {
     $cmd = [
-        getenv('NB_CLAUDE_BIN') ?: 'claude', '-p', $prompt,
+        getenv('NB_CLAUDE_BIN') ?: 'claude', '-p',
+        '--input-format', 'stream-json',
+        '--output-format', 'stream-json', '--verbose', // stream-json output requires --verbose
         '--model', (string)$config['parent_model'],
-        '--output-format', 'json',
+        '--tools', NB_PARENT_BUILTIN_TOOLS,
         '--permission-mode', 'acceptEdits',
         '--allowedTools', NB_PARENT_TOOLS,
         // See only this repo's CLAUDE.md: skip the user's own instructions, hooks, auto memory, skills.
@@ -49,20 +55,6 @@ function nb_parent_command(string $prompt, ?string $sessionId, array $config): a
         $cmd[] = $sessionId;
     }
     return $cmd;
-}
-
-/** Run a command (no shell) in $cwd with extra env vars; stderr is appended to data/parent-stderr.log. */
-function nb_run(array $cmd, string $cwd, array $env): array
-{
-    $log = dirname(nb_db_path()) . '/parent-stderr.log';
-    $spec = [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['file', $log, 'a']];
-    $proc = proc_open($cmd, $spec, $pipes, $cwd, array_merge(getenv(), $env));
-    if (!is_resource($proc)) {
-        throw new RuntimeException('could not start ' . $cmd[0]);
-    }
-    $out = (string)stream_get_contents($pipes[1]);
-    fclose($pipes[1]);
-    return [proc_close($proc), $out];
 }
 
 /**
@@ -80,12 +72,16 @@ function nb_transcript_path(?string $sessionId): ?string
     return is_file($path) ? $path : null;
 }
 
+/** The interesting part of a tool call's input: the command, file, URL or query. */
+function nb_describe_tool_input(array $input): string
+{
+    return (string)($input['command'] ?? $input['file_path'] ?? $input['url'] ?? $input['query'] ?? json_encode($input, JSON_UNESCAPED_SLASHES));
+}
+
 /** One-line description of a denied tool call, e.g. `Bash: ls /`. */
 function nb_describe_denial(array $d): string
 {
-    $input = $d['tool_input'] ?? [];
-    $detail = $input['command'] ?? $input['file_path'] ?? $input['url'] ?? $input['query'] ?? json_encode($input, JSON_UNESCAPED_SLASHES);
-    return ($d['tool_name'] ?? '?') . ': ' . $detail;
+    return ($d['tool_name'] ?? '?') . ': ' . nb_describe_tool_input($d['tool_input'] ?? []);
 }
 
 /** Write data/jobs/<id>.json with everything needed to debug this job. */
@@ -102,9 +98,11 @@ function nb_write_job_debug(array $info): string
 
 /**
  * Run one job through the parent conversation and record the outcome.
- * Returns a summary for the worker log: ok, turns, cost_usd, denials, debug_file.
+ * $parent is the long-lived claude process; it is started, reused or restarted here as needed.
+ * $onEvent gets every stream event as it arrives (the worker uses it to log tool calls).
+ * Returns a summary for the worker log: ok, turns, cost_usd, denials, debug_file, process, pid.
  */
-function nb_run_parent_job(PDO $pdo, array $job, array $config): array
+function nb_run_parent_job(PDO $pdo, array $job, array $config, NbParentProcess $parent, ?callable $onEvent = null): array
 {
     $jobId = (int)$job['id'];
     $sid = nb_setting($pdo, 'parent_session_id');
@@ -112,35 +110,48 @@ function nb_run_parent_job(PDO $pdo, array $job, array $config): array
     if ($sid !== null && $turns >= (int)$config['session_rotate_turns']) {
         $sid = null; // rotate: start fresh; durable memory is the files + DB
     }
+    // Reuse the running process only if it is still the saved session.
+    if ($parent->running() && ($sid === null || $parent->sessionId !== $sid)) {
+        $parent->stop();
+    }
     $prompt = nb_parent_prompt($job, $sid === null);
-    $cmd = nb_parent_command($prompt, $sid, $config);
 
     $started = microtime(true);
-    $code = null;
-    $out = '';
+    $newProcess = false;
+    $prevCost = 0.0;
+    $pid = null;
+    $r = ['result' => null, 'events' => [], 'error' => null];
     try {
-        [$code, $out] = nb_run($cmd, nb_root(), ['NB_JOB_ID' => (string)$jobId]);
-        $res = json_decode($out, true);
-        $ok = $code === 0 && is_array($res) && empty($res['is_error']);
-        $error = $ok ? null : (is_array($res) ? (string)($res['result'] ?? "exit $code") : "exit $code: " . trim($out));
+        if (!$parent->running()) {
+            $parent->start(nb_parent_command($sid, $config), nb_root(), dirname(nb_db_path()) . '/parent-stderr.log');
+            $newProcess = true;
+            // A resumed session reports the whole conversation's cost so far.
+            $prevCost = $sid !== null ? (float)nb_setting($pdo, 'parent_session_cost', '0') : 0.0;
+        } else {
+            $prevCost = (float)$parent->lastTotalCost;
+        }
+        $pid = $parent->pid();
+        $r = $parent->send($prompt, (float)$config['job_timeout_s'], $onEvent);
     } catch (Throwable $e) {
-        $ok = false;
-        $res = null;
-        $error = $e->getMessage();
+        $r['error'] = $e->getMessage();
+    }
+    $res = $r['result'];
+    $ok = $res !== null && empty($res['is_error']);
+    $error = $ok ? null : ($r['error'] ?? (string)($res['result'] ?? 'the agent reported an error'));
+    if (!$ok) {
+        $parent->stop(0.5); // it may be hung; the next job starts a fresh process
     }
 
-    // A resumed run reports the whole conversation's cost so far; this job's cost is the difference.
-    $sessionCost = is_array($res) && isset($res['total_cost_usd']) ? (float)$res['total_cost_usd'] : null;
-    $prevCost = $sid !== null ? (float)nb_setting($pdo, 'parent_session_cost', '0') : 0.0;
+    // total_cost_usd is cumulative for the session; this job's cost is the difference.
+    $sessionCost = isset($res['total_cost_usd']) ? (float)$res['total_cost_usd'] : null;
     $jobCost = $sessionCost === null ? null : round(max(0.0, $sessionCost - $prevCost), 6);
-    $denials = is_array($res) && is_array($res['permission_denials'] ?? null) ? $res['permission_denials'] : [];
-    $newSid = is_array($res) ? (string)($res['session_id'] ?? '') : '';
+    $denials = is_array($res['permission_denials'] ?? null) ? $res['permission_denials'] : [];
+    $newSid = (string)($res['session_id'] ?? '');
     $debugFile = nb_write_job_debug([
         'job' => $job,
         'resumed_session' => $sid,
         'prompt' => $prompt,
-        'command' => $cmd,
-        'exit_code' => $code,
+        'process' => ['pid' => $pid, 'started_for_this_job' => $newProcess, 'command' => $parent->command],
         'duration_s' => round(microtime(true) - $started, 1),
         'ok' => $ok,
         'error' => $error,
@@ -149,7 +160,7 @@ function nb_run_parent_job(PDO $pdo, array $job, array $config): array
         'session_cost_usd' => $sessionCost,
         'permission_denials' => $denials,
         'transcript' => nb_transcript_path($newSid ?: $sid),
-        'raw_output' => $out,
+        'events' => $r['events'],
     ]);
     $summary = [
         'ok' => $ok,
@@ -157,6 +168,8 @@ function nb_run_parent_job(PDO $pdo, array $job, array $config): array
         'cost_usd' => $jobCost,
         'denials' => array_map('nb_describe_denial', $denials),
         'debug_file' => $debugFile,
+        'process' => $newProcess ? 'started' : 'reused',
+        'pid' => $pid,
     ];
 
     if ($summary['denials']) {

@@ -58,6 +58,13 @@ check($code === 0 && $r['ok'] === true && end($said)['role'] === 'parent' && end
 [$code, $r] = nb_cli($cli, ['say']);
 check($code === 2 && $r['ok'] === false, 'say without text rejected');
 
+// The agent process outlives any one job, so without NB_JOB_ID the CLI uses the running job.
+nb_job_enqueue($pdo, 'chat', ['message' => 'x']);
+$running = nb_job_next($pdo);
+[$code, $r] = nb_cli($cli, ['say', 'from', 'the', 'running', 'job']);
+$said = nb_chat_since(nb_db(), 0);
+check($code === 0 && (int)end($said)['job_id'] === (int)$running['id'], 'say without NB_JOB_ID uses the running job');
+
 [$code, $r] = nb_cli($cli, ['note', 'AAAAAAAAAAA', 'love', 'the', 'drums']);
 check($code === 0 && str_ends_with($r['notes'], 'love the drums'), 'note appends to the song');
 [$code, $r] = nb_cli($cli, ['note', 'ZZZZZZZZZZZ', 'x']);

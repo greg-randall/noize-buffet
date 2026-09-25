@@ -6,105 +6,154 @@ require __DIR__ . '/../lib/parent.php';
 require __DIR__ . '/assert.php';
 
 $pdo = fresh_db('test_parent');
-$argsFile = tmp_dir() . '/fake_args.txt';
-chmod(__DIR__ . '/fake_claude.sh', 0755);
-putenv('NB_CLAUDE_BIN=' . __DIR__ . '/fake_claude.sh');
+$argsFile = tmp_dir() . '/fake_args.jsonl';
+$inputsFile = tmp_dir() . '/fake_inputs.jsonl';
+@unlink($argsFile);
+@unlink($inputsFile);
+$fake = tmp_dir() . '/fake_claude';
+file_put_contents($fake, "#!/usr/bin/env bash\nexec " . escapeshellarg(PHP_BINARY) . ' '
+    . escapeshellarg(__DIR__ . '/fake_claude_stream.php') . " \"\$@\"\n");
+chmod($fake, 0755);
+putenv("NB_CLAUDE_BIN=$fake");
 putenv("NB_FAKE_ARGS=$argsFile");
-$config = ['parent_model' => 'sonnet', 'session_rotate_turns' => 3] + nb_config();
-$args = fn() => explode("\0", rtrim((string)file_get_contents($argsFile), "\0"));
+putenv("NB_FAKE_INPUTS=$inputsFile");
+$config = ['parent_model' => 'sonnet', 'session_rotate_turns' => 3, 'job_timeout_s' => 20] + nb_config();
 
-echo "first job: new session\n";
+/** Every process start so far, each as its argument list. */
+$spawns = fn() => array_map(fn($l) => json_decode($l, true), file($argsFile, FILE_IGNORE_NEW_LINES) ?: []);
+$args = function () use ($spawns): array {
+    $all = $spawns();
+    return end($all) ?: [];
+};
+$lastInput = function () use ($inputsFile): string {
+    $lines = file($inputsFile, FILE_IGNORE_NEW_LINES);
+    return json_decode((string)end($lines), true);
+};
+$opt = fn(array $a, string $flag) => $a[array_search($flag, $a, true) + 1] ?? null;
+$run = function (array $payload, ?callable $onEvent = null, ?array $cfg = null) use ($pdo, &$parent, $config): array {
+    nb_job_enqueue($pdo, 'chat', $payload);
+    return nb_run_parent_job($pdo, nb_job_next($pdo), $cfg ?? $config, $parent, $onEvent);
+};
+$parent = new NbParentProcess();
+
+echo "first job: starts a process with a new session\n";
 nb_chat_add($pdo, 'user', 'hi there');
 $id = nb_job_enqueue($pdo, 'chat', ['message' => 'hi there']);
-nb_run_parent_job($pdo, nb_job_next($pdo), $config);
+$s = nb_run_parent_job($pdo, nb_job_next($pdo), $config, $parent);
 $a = $args();
+check(count($spawns()) === 1 && $s['process'] === 'started' && $parent->running(), 'one process started and still running');
 check(!in_array('--resume', $a, true), 'no --resume on first job');
-check(in_array('--output-format', $a, true) && in_array('json', $a, true), 'json output');
-check(in_array('acceptEdits', $a, true) && in_array('sonnet', $a, true), 'permission mode and model');
-$tools = $a[array_search('--allowedTools', $a, true) + 1] ?? '';
+check($opt($a, '--input-format') === 'stream-json' && $opt($a, '--output-format') === 'stream-json' && in_array('--verbose', $a, true), 'stream-json in and out');
+check($opt($a, '--tools') === 'Read,Edit,Write,WebSearch,WebFetch,Bash', 'built-in tools restricted');
+check(in_array('acceptEdits', $a, true) && $opt($a, '--model') === 'sonnet', 'permission mode and model');
+$tools = (string)$opt($a, '--allowedTools');
 check(str_contains($tools, 'Bash(php bin/nb.php *)') && str_contains($tools, 'Bash(python3 scripts/yt_search.py *)'), 'narrow allowed tools');
-check(str_contains($a[array_search('-p', $a, true) + 1], 'CLAUDE.md'), 'new-session prompt mentions CLAUDE.md');
-check(str_contains($a[array_search('-p', $a, true) + 1], 'hi there'), 'prompt carries the user message');
-check(in_array("NB_JOB_ID=$id", $a, true), 'NB_JOB_ID passed');
 check(in_array('--disable-slash-commands', $a, true), 'skills and commands disabled');
-$settings = json_decode($a[array_search('--settings', $a, true) + 1] ?? '', true);
+$settings = json_decode((string)$opt($a, '--settings'), true);
 check(is_array($settings) && $settings['disableAllHooks'] === true && $settings['autoMemoryEnabled'] === false, 'isolation settings passed');
 check(!in_array(realpath(nb_root()) . '/CLAUDE.md', $settings['claudeMdExcludes'], true), "the repo's own CLAUDE.md is not excluded");
+check(str_contains($lastInput(), 'CLAUDE.md') && str_contains($lastInput(), 'hi there'), 'first message has the intro and the user message');
 $last = nb_chat_since($pdo, 0);
 check(end($last)['role'] === 'parent' && end($last)['text'] === 'hello from fake', 'reply in chat');
-check(nb_setting($pdo, 'parent_session_id') === 'sess-123' && nb_setting($pdo, 'parent_turns') === '1', 'session saved, turns 1');
+$sid = nb_setting($pdo, 'parent_session_id');
+check($sid === $parent->sessionId && str_starts_with((string)$sid, 'sess-') && nb_setting($pdo, 'parent_turns') === '1', 'session saved, turns 1');
 check($pdo->query("SELECT status FROM jobs WHERE id = $id")->fetchColumn() === 'done', 'job done');
 
-echo "second job: resume\n";
-nb_job_enqueue($pdo, 'chat', ['message' => 'more please']);
-nb_run_parent_job($pdo, nb_job_next($pdo), $config);
-$a = $args();
-check(($a[array_search('--resume', $a, true) + 1] ?? '') === 'sess-123', 'resumes saved session');
-check(!str_contains($a[array_search('-p', $a, true) + 1], 'CLAUDE.md'), 'no re-intro on resumed session');
-check(nb_setting($pdo, 'parent_turns') === '2', 'turns 2');
+echo "second job: same process\n";
+$events = [];
+$s = $run(['message' => 'more please'], function (array $e) use (&$events) { $events[] = $e; });
+check(count($spawns()) === 1 && $s['process'] === 'reused', 'no new process');
+check(!str_contains($lastInput(), 'CLAUDE.md') && str_contains($lastInput(), 'more please'), 'no re-intro in the same session');
+check(nb_setting($pdo, 'parent_turns') === '2' && nb_setting($pdo, 'parent_session_id') === $sid, 'turns 2, same session');
+check(abs($s['cost_usd'] - 0.005) < 1e-9, 'job cost is the difference from the previous total');
+$tool = array_filter($events, fn($e) => ($e['type'] ?? '') === 'assistant' && ($e['message']['content'][0]['type'] ?? '') === 'tool_use');
+check(count($tool) === 1 && end($events)['type'] === 'result', 'onEvent sees tool calls and the result');
 
-echo "rotation\n";
-nb_setting_set($pdo, 'parent_turns', '3');
-nb_job_enqueue($pdo, 'chat', ['message' => 'x']);
-nb_run_parent_job($pdo, nb_job_next($pdo), $config);
-check(!in_array('--resume', $args(), true) && nb_setting($pdo, 'parent_turns') === '1', 'rotates after session_rotate_turns');
+echo "per-job cost\n";
+$s = $run(['message' => 'FAKE_COST=0.035']);
+check(abs($s['cost_usd'] - 0.025) < 1e-9, 'cost from a jump in the total');
+
+echo "rotation starts a fresh process\n";
+$oldPid = $parent->pid();
+$s = $run(['message' => 'x']); // parent_turns is 3 now, which is session_rotate_turns
+check(count($spawns()) === 2 && $s['process'] === 'started' && $parent->pid() !== $oldPid, 'new process');
+check(!in_array('--resume', $args(), true) && str_contains($lastInput(), 'CLAUDE.md'), 'fresh session with the intro');
+check(nb_setting($pdo, 'parent_turns') === '1' && nb_setting($pdo, 'parent_session_id') !== $sid, 'turns reset, new session id');
 
 echo "song context in the prompt\n";
-nb_job_enqueue($pdo, 'chat', ['message' => 'love the drums', 'song' => nb_song_context(
+$run(['message' => 'love the drums', 'song' => nb_song_context(
     ['video_id' => 'AAAAAAAAAAA', 'artist' => 'Some Artist', 'title' => 'Some Song', 'furthest_pct' => 64, 'rating' => 'yes', 'new_to_me' => true])]);
-nb_run_parent_job($pdo, nb_job_next($pdo), $config);
-$p = $args()[array_search('-p', $args(), true) + 1];
+$p = $lastInput();
 check(str_contains($p, 'currently listening to: Some Artist - Some Song [video_id AAAAAAAAAAA]') && str_contains($p, 'heard 64%')
     && str_contains($p, 'rating: yes') && str_contains($p, 'new to them') && str_contains($p, 'love the drums'), 'prompt carries the current song');
 
 echo "interview prompt\n";
 nb_job_enqueue($pdo, 'interview');
-nb_run_parent_job($pdo, nb_job_next($pdo), $config);
-check(str_contains($args()[array_search('-p', $args(), true) + 1], 'interview'), 'interview prompt');
+nb_run_parent_job($pdo, nb_job_next($pdo), $config, $parent);
+check(str_contains($lastInput(), 'interview'), 'interview prompt');
 
-echo "failure\n";
-putenv('NB_FAKE_FAIL=1');
-$fid = nb_job_enqueue($pdo, 'chat', ['message' => 'will fail']);
-nb_run_parent_job($pdo, nb_job_next($pdo), $config);
-putenv('NB_FAKE_FAIL');
+echo "worker restart resumes the saved session\n";
+$parent->stop();
+$parent = new NbParentProcess();
+$sid = nb_setting($pdo, 'parent_session_id');
+nb_setting_set($pdo, 'parent_session_cost', '0.02');
+nb_setting_set($pdo, 'parent_turns', '1'); // keep it below session_rotate_turns so the session is resumed
+$s = $run(['message' => 'FAKE_COST=0.03 back again']);
+check($s['process'] === 'started' && $opt($args(), '--resume') === $sid, 'new process resumes the saved session');
+check(!str_contains($lastInput(), 'CLAUDE.md'), 'no re-intro when resuming');
+check(abs($s['cost_usd'] - 0.01) < 1e-9, 'first job after resume subtracts the saved session cost');
+
+echo "error result\n";
+$before = count($spawns());
+$fid = nb_job_enqueue($pdo, 'chat', ['message' => 'FAKE_FAIL']);
+nb_run_parent_job($pdo, nb_job_next($pdo), $config, $parent);
 $job = $pdo->query("SELECT status, error FROM jobs WHERE id = $fid")->fetch();
 check($job['status'] === 'failed' && str_contains((string)$job['error'], 'boom'), 'job failed with error');
 $msgs = nb_chat_since($pdo, 0);
 check(end($msgs)['role'] === 'system' && str_contains(end($msgs)['text'], 'boom'), 'system message in chat');
-check(nb_setting($pdo, 'parent_session_id') === null, 'session cleared after failure');
-$dbg = json_decode((string)file_get_contents(tmp_dir() . "/jobs/$fid.json"), true);
-check(is_array($dbg) && $dbg['ok'] === false && str_contains($dbg['raw_output'], 'boom'), 'failed job debug file has raw output');
 check(str_contains(end($msgs)['text'], "jobs/$fid.json"), 'error message points at the debug file');
+check(nb_setting($pdo, 'parent_session_id') === null && !$parent->running(), 'session cleared and process stopped');
+$dbg = json_decode((string)file_get_contents(tmp_dir() . "/jobs/$fid.json"), true);
+check($dbg['ok'] === false && str_contains(json_encode($dbg['events']), 'boom'), 'debug file has the events');
+$s = $run(['message' => 'after the error']);
+check($s['ok'] && count($spawns()) === $before + 1 && !in_array('--resume', $args(), true), 'next job starts a fresh process');
+
+echo "process exits mid-job\n";
+$xid = nb_job_enqueue($pdo, 'chat', ['message' => 'FAKE_EXIT']);
+$s = nb_run_parent_job($pdo, nb_job_next($pdo), $config, $parent);
+$err = (string)$pdo->query("SELECT error FROM jobs WHERE id = $xid")->fetchColumn();
+check(!$s['ok'] && str_contains($err, 'exited') && str_contains($err, 'exit code 3'), 'job failed: process exited');
+check(!$parent->running() && nb_setting($pdo, 'parent_session_id') === null, 'process gone, session cleared');
+
+echo "timeout\n";
+$t = microtime(true);
+$hid = nb_job_enqueue($pdo, 'chat', ['message' => 'FAKE_HANG']);
+$s = nb_run_parent_job($pdo, nb_job_next($pdo), ['job_timeout_s' => 1] + $config, $parent);
+$err = (string)$pdo->query("SELECT error FROM jobs WHERE id = $hid")->fetchColumn();
+check(!$s['ok'] && str_contains($err, 'no reply') && !$parent->running(), 'job failed and process killed');
+check(microtime(true) - $t < 4.5, 'gave up near the timeout, not after the hang');
 
 echo "debug output\n";
 $okId = nb_job_enqueue($pdo, 'chat', ['message' => 'debug me']);
-$s = nb_run_parent_job($pdo, nb_job_next($pdo), $config);
+$s = nb_run_parent_job($pdo, nb_job_next($pdo), $config, $parent);
 $dbg = json_decode((string)file_get_contents(tmp_dir() . "/jobs/$okId.json"), true);
-check($s['ok'] === true && $s['turns'] === 2 && $s['cost_usd'] === 0.005 && $s['denials'] === [], 'summary has turns and cost');
-check($dbg['prompt'] !== '' && str_contains($dbg['prompt'], 'debug me') && $dbg['exit_code'] === 0, 'debug file has prompt and exit code');
-check(in_array('--allowedTools', $dbg['command'], true) && is_numeric($dbg['duration_s']), 'debug file has command and duration');
+check($s['ok'] === true && $s['turns'] === 2 && $s['denials'] === [] && is_int($s['pid']), 'summary has turns, denials, pid');
+check(str_contains($dbg['prompt'], 'debug me') && $dbg['process']['started_for_this_job'] === true, 'debug file has prompt and process info');
+check(in_array('--allowedTools', $dbg['process']['command'], true) && is_numeric($dbg['duration_s']), 'debug file has command and duration');
+check(count($dbg['events']) === 3 && end($dbg['events'])['type'] === 'result', 'debug file has every event');
 check(array_key_exists('transcript', $dbg), 'debug file has transcript field');
 
 echo "permission denials\n";
-putenv('NB_FAKE_DENY=1');
-$dId = nb_job_enqueue($pdo, 'chat', ['message' => 'do something sneaky']);
-$s = nb_run_parent_job($pdo, nb_job_next($pdo), $config);
-putenv('NB_FAKE_DENY');
+$dId = nb_job_enqueue($pdo, 'chat', ['message' => 'FAKE_DENY']);
+$s = nb_run_parent_job($pdo, nb_job_next($pdo), $config, $parent);
 check($s['denials'] === ['Bash: ls /'], 'denial summarised');
 $sys = array_values(array_filter(nb_chat_since($pdo, 0), fn($m) => $m['role'] === 'system' && (int)$m['job_id'] === $dId));
 check(count($sys) === 1 && str_contains($sys[0]['text'], 'Bash: ls /'), 'denial posted to chat');
 check($pdo->query("SELECT status FROM jobs WHERE id = $dId")->fetchColumn() === 'done', 'job with denials still completes');
 
-echo "per-job cost on resumed sessions\n";
-nb_setting_set($pdo, 'parent_turns', '0'); // keep the session from rotating mid-check (rotate_turns is 3 here)
-putenv('NB_FAKE_COST=0.01');
-nb_job_enqueue($pdo, 'chat', ['message' => 'a']);
-$s1 = nb_run_parent_job($pdo, nb_job_next($pdo), $config);
-putenv('NB_FAKE_COST=0.035');
-nb_job_enqueue($pdo, 'chat', ['message' => 'b']);
-$s2 = nb_run_parent_job($pdo, nb_job_next($pdo), $config);
-putenv('NB_FAKE_COST');
-check(abs($s2['cost_usd'] - 0.025) < 1e-9, 'resumed job cost is the difference from the previous total');
+echo "stop\n";
+$parent->stop();
+check(!$parent->running() && $parent->stop() === null, 'stop is idempotent');
 
 echo "transcript path\n";
 check(nb_transcript_path(null) === null && nb_transcript_path('no-such-session') === null, 'missing transcript gives null');

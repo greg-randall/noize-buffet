@@ -6,6 +6,7 @@ const NB_CONFIG_DEFAULTS = [
     'mix' => ['close' => 0.7, 'lead' => 0.2, 'wildcard' => 0.1],
     'parent_model' => 'sonnet',
     'session_rotate_turns' => 40,
+    'job_timeout_s' => 600, // give up on a job (and restart the agent process) after this long
 ];
 
 /** Defaults overlaid with config.json (if present). */

@@ -21,9 +21,14 @@ const NB_USAGE = [
 /** Print the JSON result, append the call to data/nb.log (one JSON object per line), and exit. */
 function out(mixed $data, int $code = 0): never
 {
-    global $argv;
+    global $argv, $pdo;
     $args = array_slice($argv, 1);
-    $entry = ['at' => nb_now(), 'job' => getenv('NB_JOB_ID') ?: null, 'args' => $args, 'exit' => $code, 'output' => $data];
+    try {
+        $job = nb_cli_job_id($pdo);
+    } catch (Throwable) {
+        $job = null; // still log the call if the database is the problem
+    }
+    $entry = ['at' => nb_now(), 'job' => $job, 'args' => $args, 'exit' => $code, 'output' => $data];
     if (($args[0] ?? '') === 'add-batch' && is_file($args[1] ?? '')) {
         $entry['input'] = (string)file_get_contents($args[1]); // exactly what the agent tried to add
     }
@@ -31,6 +36,15 @@ function out(mixed $data, int $code = 0): never
         json_encode($entry, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
     echo json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "\n";
     exit($code);
+}
+
+/** The job this call belongs to: NB_JOB_ID if set, else the running job (the agent process outlives any one job). */
+function nb_cli_job_id(PDO $pdo): ?int
+{
+    if (getenv('NB_JOB_ID')) {
+        return (int)getenv('NB_JOB_ID');
+    }
+    return nb_job_status($pdo)['running']['id'] ?? null;
 }
 
 $pdo = nb_db();
@@ -54,7 +68,7 @@ try {
             if (!is_array($in) || !isset($in['songs']) || !is_array($in['songs'])) {
                 out(['ok' => false, 'error' => 'argument must be a JSON file: {"summary": "...", "songs": [...]}'], 2);
             }
-            $jobId = getenv('NB_JOB_ID') ? (int)getenv('NB_JOB_ID') : null;
+            $jobId = nb_cli_job_id($pdo);
             out(['ok' => true] + nb_add_batch($pdo, $in['songs'], (string)($in['summary'] ?? ''), $jobId));
 
         case 'mute':
@@ -69,7 +83,7 @@ try {
             if ($text === '') {
                 out(['ok' => false, 'error' => 'say needs some text'], 2);
             }
-            $jobId = getenv('NB_JOB_ID') ? (int)getenv('NB_JOB_ID') : null;
+            $jobId = nb_cli_job_id($pdo);
             out(['ok' => true, 'id' => nb_chat_add($pdo, 'parent', $text, $jobId)]);
 
         case 'mutes':

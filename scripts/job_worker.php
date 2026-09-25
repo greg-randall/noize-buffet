@@ -6,6 +6,20 @@ require dirname(__DIR__) . '/lib/config.php';
 require dirname(__DIR__) . '/lib/parent.php';
 
 $once = in_array('--once', $argv, true);
+$parent = new NbParentProcess(); // one claude process, kept alive between jobs
+
+/** Log each tool call as it streams in, so a long batch isn't silent. */
+$logToolCalls = function (array $event): void {
+    if (($event['type'] ?? '') !== 'assistant') {
+        return;
+    }
+    foreach ($event['message']['content'] ?? [] as $block) {
+        if (($block['type'] ?? '') === 'tool_use') {
+            fwrite(STDERR, "    tool: {$block['name']}: " . nb_describe_tool_input($block['input'] ?? []) . "\n");
+        }
+    }
+};
+
 $pdo = nb_db();
 $config = nb_config();
 $interrupted = nb_jobs_recover_interrupted($pdo);
@@ -18,6 +32,7 @@ while (true) {
     $job = nb_job_next($pdo);
     if ($job === null) {
         if ($once) {
+            $parent->stop();
             exit(0);
         }
         sleep(2);
@@ -25,10 +40,11 @@ while (true) {
     }
     fwrite(STDERR, '[' . nb_now() . "] job {$job['id']} ({$job['kind']}) started\n");
     $t = microtime(true);
-    $s = nb_run_parent_job($pdo, $job, $config);
+    $s = nb_run_parent_job($pdo, $job, $config, $parent, $logToolCalls);
     $status = $pdo->query('SELECT status FROM jobs WHERE id = ' . (int)$job['id'])->fetchColumn();
-    fwrite(STDERR, sprintf("[%s] job %d %s in %.1fs, %s turns, $%s (API-equivalent)\n", nb_now(), $job['id'], $status,
-        microtime(true) - $t, $s['turns'] ?? '?', isset($s['cost_usd']) ? number_format((float)$s['cost_usd'], 4) : '?'));
+    fwrite(STDERR, sprintf("[%s] job %d %s in %.1fs, %s turns, $%s (API-equivalent), agent process %s (pid %s)\n", nb_now(),
+        $job['id'], $status, microtime(true) - $t, $s['turns'] ?? '?',
+        isset($s['cost_usd']) ? number_format((float)$s['cost_usd'], 4) : '?', $s['process'], $s['pid'] ?? '?'));
     foreach ($s['denials'] as $d) {
         fwrite(STDERR, "    BLOCKED: $d\n");
     }
