@@ -9,7 +9,7 @@ You chat with an AI agent in a local web page. It asks what you're after, then k
 - [Claude Code](https://claude.com/claude-code), logged in with your own account (it runs the agent)
 - PHP 8.1+ with `pdo_sqlite`
 - Python 3 and [yt-dlp](https://github.com/yt-dlp/yt-dlp)
-- Optional but recommended: a TypeSafe API key in `.env` (`start.py` creates `.env` from `.env.example` for you). Used by comment mining, coming in a later stage
+- A TypeSafe API key in `.env` (`start.py` creates `.env` from `.env.example` for you). Used by comment mining, coming in a later stage. `start.py` stops if the key is missing; to run without one, use `python3 start.py --no-typesafe`
 
 ## Start
 

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Check requirements, then start noize-buffet: the web server and the agent worker together.
 
-Usage: python3 start.py            (uses port 8000, or a random free one between 8001 and 8999 if 8000 is taken)
-       NB_PORT=8080 python3 start.py  (exactly this port)
+Usage: python3 start.py                     (uses port 8000, or a random free one between 8001 and 8999 if 8000 is taken)
+       NB_PORT=8080 python3 start.py        (exactly this port)
+       python3 start.py --no-typesafe       (run without a TypeSafe API key)
 
 Ctrl+C stops both.
 """
+import argparse
 import os
 import random
 import re
@@ -56,7 +58,8 @@ def check_requirements():
     return ok
 
 
-def check_env():
+def check_env(no_typesafe):
+    """Create .env if missing. Without a TypeSafe key, stop unless --no-typesafe was given."""
     env_file, example = ROOT / ".env", ROOT / ".env.example"
     if not env_file.exists() and example.exists():
         shutil.copyfile(example, env_file)
@@ -67,13 +70,16 @@ def check_env():
         report(True, "TypeSafe API key in .env")
         return
     bar = "!" * 72
-    print(f"\n{bar}\n"
-          "  No TypeSafe API key found in .env\n\n"
-          "  Comment mining (coming soon) will fall back to a simple keyword filter:\n"
-          "  noisier leads, fewer comments read, and more of your Claude usage.\n"
-          "  A normal month on TypeSafe costs well under $5; check https://typesafe.ai\n"
-          "  for current free credits, then put TYPESAFE_API=your-key in .env\n"
-          f"{bar}\n")
+    message = (f"\n{bar}\n"
+               "  No TypeSafe API key found in .env\n\n"
+               "  Comment mining (coming soon) will fall back to a simple keyword filter:\n"
+               "  noisier leads, fewer comments read, and more of your Claude usage.\n"
+               "  A normal month on TypeSafe costs well under $5; check https://typesafe.ai\n"
+               "  for current free credits, then put TYPESAFE_API=your-key in .env\n")
+    if no_typesafe:
+        print(message + "\n  Continuing without it (--no-typesafe).\n" + f"{bar}\n")
+        return
+    sys.exit(message + "\n  To run without it anyway: python3 start.py --no-typesafe\n" + bar)
 
 
 def port_free(port):
@@ -113,9 +119,13 @@ def pipe_output(proc, prefix):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Start the noize-buffet web server and agent worker.")
+    parser.add_argument("--no-typesafe", action="store_true",
+                        help="run without a TypeSafe API key (comment mining falls back to a keyword filter)")
+    args = parser.parse_args()
     if not check_requirements():
         sys.exit("\nFix the missing requirements above, then run python3 start.py again.")
-    check_env()
+    check_env(args.no_typesafe)
     (ROOT / "data").mkdir(exist_ok=True)
     port = choose_port()
 
