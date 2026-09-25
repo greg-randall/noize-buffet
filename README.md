@@ -4,7 +4,7 @@ An endless, ever-changing stream of music suggestions, built around your taste a
 
 You chat with an AI agent in a local web page. It asks what you're after, then keeps adding batches of YouTube songs to a queue. You listen in the embedded player. It records how far you got, your rating, your notes and whether a song was new to you, and each new batch learns from that.
 
-![noize-buffet: the player, song details and ratings on the left with the playlist below, and the chat with the agent on the right](screenshot.png)
+![noize-buffet: the player, song details and ratings on the left with the playlist below, and the chat with the agent on the right](screenshot.webp)
 
 ## Requirements
 
