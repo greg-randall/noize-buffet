@@ -4,7 +4,10 @@ require_once __DIR__ . '/isolation.php';
 require_once __DIR__ . '/parent_process.php';
 
 // Tools the parent may use without asking. Bash is limited to the two helper scripts.
-const NB_PARENT_TOOLS = 'Read Edit Write WebSearch WebFetch Bash(php bin/nb.php *) Bash(python3 scripts/yt_search.py *)';
+// Read, Edit and Write are deliberately NOT listed: a bare rule allows them on any path. Without one, reads in the
+// repo need no approval and --permission-mode acceptEdits approves edits in the repo; anything outside it would
+// need approval, which a headless run can't give, so it is refused.
+const NB_PARENT_TOOLS = 'WebSearch WebFetch Bash(php bin/nb.php *) Bash(python3 scripts/yt_search.py *)';
 // The only built-in tools the parent has at all (drops Task, Cron, Glob, etc.).
 const NB_PARENT_BUILTIN_TOOLS = 'Read,Edit,Write,WebSearch,WebFetch,Bash';
 

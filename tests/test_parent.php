@@ -48,6 +48,7 @@ check($opt($a, '--tools') === 'Read,Edit,Write,WebSearch,WebFetch,Bash', 'built-
 check(in_array('acceptEdits', $a, true) && $opt($a, '--model') === 'sonnet', 'permission mode and model');
 $tools = (string)$opt($a, '--allowedTools');
 check(str_contains($tools, 'Bash(php bin/nb.php *)') && str_contains($tools, 'Bash(python3 scripts/yt_search.py *)'), 'narrow allowed tools');
+check(!preg_match('/(^| )(Read|Edit|Write)( |$)/', $tools), 'no path-less Read/Edit/Write rule (it would allow any path)');
 check(in_array('--disable-slash-commands', $a, true), 'skills and commands disabled');
 $settings = json_decode((string)$opt($a, '--settings'), true);
 check(is_array($settings) && $settings['disableAllHooks'] === true && $settings['autoMemoryEnabled'] === false, 'isolation settings passed');
