@@ -54,6 +54,7 @@ $settings = json_decode((string)$opt($a, '--settings'), true);
 check(is_array($settings) && $settings['disableAllHooks'] === true && $settings['autoMemoryEnabled'] === false, 'isolation settings passed');
 check(!in_array(realpath(nb_root()) . '/CLAUDE.md', $settings['claudeMdExcludes'], true), "the repo's own CLAUDE.md is not excluded");
 check(str_contains($lastInput(), 'CLAUDE.md') && str_contains($lastInput(), 'hi there'), 'first message has the intro and the user message');
+check((bool)preg_match('/\(Sent at \d{4}-\d\d-\d\d \d\d:\d\d UTC, unix \d{10}\.\)/', $lastInput()), 'message carries when it was sent');
 $last = nb_chat_since($pdo, 0);
 check(end($last)['role'] === 'parent' && end($last)['text'] === 'hello from fake', 'reply in chat');
 $sid = nb_setting($pdo, 'parent_session_id');

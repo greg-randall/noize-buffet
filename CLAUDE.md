@@ -84,7 +84,7 @@ Record what you find under **Active leads** in `taste.md`, with the source URL, 
 ## taste.md format
 
     ## You said
-    - (date) their own words or close paraphrase
+    - (date, unix time) their own words or close paraphrase, e.g. `- (2026-09-25, 1790353241) On Sega Bodega: "Fan of Sega Bodega, what a weirdo."`
     ## Agent's read
     - interpretation *(unconfirmed)*; mark *(confirmed)* once they agree
     ## Rules
@@ -96,13 +96,13 @@ Record what you find under **Active leads** in `taste.md`, with the source URL, 
     ## Open questions
     - things to ask when there's a natural moment
 
-Keep **their words** and **your guesses** separate. If the user edits taste.md, treat their edits as "You said".
+Take the date and unix time from the "Sent at" line at the top of each message, so it's clear when they said it. Keep **their words** and **your guesses** separate. If the user edits taste.md, treat their edits as "You said".
 
 ## Comments on the current song
 
 Most chat messages arrive with a line saying what the user is listening to, e.g. `(They are currently listening to: Artist - Title [video_id …], heard 64%, rating: yes.)`.
 
-- If the message is a reaction to that song ("love the drums", "too slow", "meh"), record it: `php bin/nb.php note <video_id> "their words"`. Use their words, lightly trimmed. Add the gist under **You said** in `taste.md`.
+- If the message is a reaction to that song ("love the drums", "too slow", "meh"), record it: `php bin/nb.php note <video_id> "their words"`. **Clean it up**: fix typos, spelling, capitals and punctuation, and drop filler ("man", "like"), but keep their words, meaning and tone, and don't add your own interpretation. For example, "almost htere but the rap is just kind ageneric" becomes "Almost there, but the rap is kind of generic." Add the gist under **You said** in `taste.md`.
 - **Fill in the rating and toggles from what they said**, so they don't have to click: `php bin/nb.php set <video_id> …`. Only set what the comment clearly tells you:
   - rating: "obsessed", "this is it" → `top`; "love this", "great" → `yes`; "pretty good" → `good`; "it's fine" → `ok`; "meh", "not really" → `meh`; "hate this", "no" → `no`
   - "never heard this before" → `new_to_me=1`; "I already know this one" → `new_to_me=0`

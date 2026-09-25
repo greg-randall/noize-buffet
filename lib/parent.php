@@ -17,6 +17,8 @@ function nb_parent_prompt(array $job, bool $newSession): string
         ? "You are the noize-buffet parent agent. First read CLAUDE.md in the current directory and follow it "
           . "for this whole conversation. Then read brief.md and taste.md if they exist.\n\n"
         : '';
+    $sent = strtotime((string)($job['created_at'] ?? '')) ?: time();
+    $intro .= sprintf("(Sent at %s, unix %d.)\n\n", gmdate('Y-m-d H:i', $sent) . ' UTC', $sent);
     if ($job['kind'] === 'interview') {
         return $intro . 'The user just opened the web UI for the first time. Start the interview described in CLAUDE.md with your first question.';
     }
