@@ -1,0 +1,33 @@
+# noize-buffet
+
+An endless, ever-changing stream of music suggestions, built around your taste and run entirely on your own machine.
+
+You chat with an AI agent in a local web page. It asks what you're after, then keeps adding batches of YouTube songs to a queue. You listen in the embedded player. It records how far you got, your rating, your notes and whether a song was new to you, and each new batch learns from that.
+
+## Requirements
+
+- [Claude Code](https://claude.com/claude-code), logged in with your own account (it runs the agent)
+- PHP 8.1+ with `pdo_sqlite`
+- Python 3 and [yt-dlp](https://github.com/yt-dlp/yt-dlp)
+- Optional but recommended: a TypeSafe API key in `.env` (used by comment mining, coming in a later stage)
+
+## Start
+
+    claude            # then run /music-setup once
+
+Then, in two terminals in this folder:
+
+    PHP_CLI_SERVER_WORKERS=4 php -S localhost:8000 -t player
+    php scripts/job_worker.php
+
+Open http://localhost:8000.
+
+## Where things live
+
+- `brief.md`, `taste.md`: what you're after and what the agent has learned (you can edit both)
+- `data/music.sqlite`: your queue and listening history (never committed)
+- `config.json`: batch size, mix and model settings
+
+## Tests
+
+    bash tests/run.sh
