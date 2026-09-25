@@ -1,0 +1,7 @@
+.env
+data/
+comments/
+*.sqlite
+*.sqlite-journal
+docs/
+tests/tmp/

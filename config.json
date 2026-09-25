@@ -1,0 +1,6 @@
+{
+  "batch_size": 12,
+  "mix": {"close": 0.7, "lead": 0.2, "wildcard": 0.1},
+  "parent_model": "sonnet",
+  "session_rotate_turns": 40
+}
