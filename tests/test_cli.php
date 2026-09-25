@@ -1,0 +1,55 @@
+<?php
+declare(strict_types=1);
+require __DIR__ . '/../lib/db.php';
+require __DIR__ . '/assert.php';
+
+fresh_db('test_cli'); // sets NB_DB for the child processes
+$cli = __DIR__ . '/../bin/nb.php';
+
+function nb_cli(string $cli, array $args): array
+{
+    $cmd = array_merge([PHP_BINARY, $cli], $args);
+    $p = proc_open($cmd, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+    $out = stream_get_contents($pipes[1]);
+    stream_get_contents($pipes[2]);
+    $code = proc_close($p);
+    return [$code, json_decode((string)$out, true)];
+}
+
+$batchFile = tmp_dir() . '/batch.json';
+file_put_contents($batchFile, json_encode(['summary' => 'test batch', 'songs' => [
+    ['video_id' => 'AAAAAAAAAAA', 'artist' => 'A', 'title' => 'Song A', 'bucket' => 'close', 'reason' => 'because'],
+]]));
+putenv('NB_JOB_ID=7');
+[$code, $res] = nb_cli($cli, ['add-batch', $batchFile]);
+putenv('NB_JOB_ID');
+check($code === 0 && $res['ok'] === true && $res['added'] === ['AAAAAAAAAAA'], 'add-batch from file');
+
+[$code, $q] = nb_cli($cli, ['queue']);
+check($code === 0 && count($q) === 1 && $q[0]['title'] === 'Song A', 'queue lists the song');
+
+$pdo = nb_db();
+check((int)$pdo->query('SELECT job_id FROM batches')->fetchColumn() === 7, 'batch records NB_JOB_ID');
+// Timestamps have 1-second resolution; move the batch into the past so "since the batch" is unambiguous.
+$pdo->exec("UPDATE batches SET created_at = '2001-01-01T00:00:00Z'");
+nb_save_listen($pdo, ['video_id' => 'AAAAAAAAAAA', 'rating' => 'yes']);
+[$code, $fb] = nb_cli($cli, ['feedback', 'all']);
+check($code === 0 && $fb['since'] === null && $fb['listens'][0]['rating'] === 'yes', 'feedback all');
+[$code, $fb] = nb_cli($cli, ['feedback']);
+check($code === 0 && $fb['since'] !== null && count($fb['listens']) === 1, 'feedback since last batch');
+
+[$code, $m] = nb_cli($cli, ['mute', 'artist', 'Some', 'Band']);
+check($code === 0 && $m['ok'] === true, 'mute');
+[$code, $ms] = nb_cli($cli, ['mutes']);
+check($ms[0]['value'] === 'Some Band', 'mutes lists value with spaces');
+
+[$code, $st] = nb_cli($cli, ['status']);
+check($code === 0 && $st['songs'] === 1 && $st['rated'] === 1 && $st['unplayed'] === 0, 'status counts');
+
+file_put_contents($batchFile, 'not json');
+[$code, $res] = nb_cli($cli, ['add-batch', $batchFile]);
+check($code === 2 && $res['ok'] === false, 'bad JSON rejected');
+[$code, $res] = nb_cli($cli, ['frobnicate']);
+check($code === 2 && isset($res['usage']), 'unknown command shows usage');
+
+finish();
