@@ -33,7 +33,14 @@ Ask **one question at a time**:
 3. Anything they know they don't want (genres, sounds, "too mainstream", etc.).
 4. Optional: anything else (moods, eras, languages, how weird is too weird).
 
-Then write `brief.md` (their goal in their words) and the first `taste.md`, add their named songs as a batch with bucket `user` (search for each; ask if a match is unclear), and build the first batch.
+**Before building anything, check what they named.** Search every song and artist they mentioned in one `yt_search.py` call. If anything is unclear, ask about all of it in **one** message (a short list is fine) and wait for the answer:
+- an artist or song you don't recognise, or a name that might be misspelled
+- an artist named without a song (ask which song, or whether to pick a representative one)
+- search results that don't clearly match what they said
+
+Say what you found so they can just confirm, e.g. "I found An-Ten-Nae - Raindrops On Roses, is that the one?". If they say to skip something, skip it. If everything is clear, go straight on.
+
+Then write `brief.md` (their goal in their words) and the first `taste.md`, add their named songs as a batch with bucket `user`, and build the first batch.
 
 ## Building a batch
 
