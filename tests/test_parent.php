@@ -87,6 +87,17 @@ $sys = array_values(array_filter(nb_chat_since($pdo, 0), fn($m) => $m['role'] ==
 check(count($sys) === 1 && str_contains($sys[0]['text'], 'Bash: ls /'), 'denial posted to chat');
 check($pdo->query("SELECT status FROM jobs WHERE id = $dId")->fetchColumn() === 'done', 'job with denials still completes');
 
+echo "per-job cost on resumed sessions\n";
+nb_setting_set($pdo, 'parent_turns', '0'); // keep the session from rotating mid-check (rotate_turns is 3 here)
+putenv('NB_FAKE_COST=0.01');
+nb_job_enqueue($pdo, 'chat', ['message' => 'a']);
+$s1 = nb_run_parent_job($pdo, nb_job_next($pdo), $config);
+putenv('NB_FAKE_COST=0.035');
+nb_job_enqueue($pdo, 'chat', ['message' => 'b']);
+$s2 = nb_run_parent_job($pdo, nb_job_next($pdo), $config);
+putenv('NB_FAKE_COST');
+check(abs($s2['cost_usd'] - 0.025) < 1e-9, 'resumed job cost is the difference from the previous total');
+
 echo "transcript path\n";
 check(nb_transcript_path(null) === null && nb_transcript_path('no-such-session') === null, 'missing transcript gives null');
 

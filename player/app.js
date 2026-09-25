@@ -227,8 +227,11 @@ window.onYouTubeIframeAPIReady = function () {
 function appendChat(m) {
   const label = {user: 'you', parent: 'agent', system: 'system'}[m.role] || m.role;
   const cls = m.role === 'system' ? 'text-warning' : (m.role === 'user' ? 'text-info' : 'text-secondary');
-  $('#chat-log').append($('<div class="mb-2">').append(
-    $('<div class="small">').addClass(cls).text(label), $('<div class="chat-text">').text(m.text)));
+  // Agent replies are Markdown, rendered and sanitised; user and system messages stay plain text.
+  const $body = m.role === 'parent' && window.marked && window.DOMPurify
+    ? $('<div class="chat-md">').html(DOMPurify.sanitize(marked.parse(m.text)))
+    : $('<div class="chat-text">').text(m.text);
+  $('#chat-log').append($('<div class="mb-2">').append($('<div class="small">').addClass(cls).text(label), $body));
   const log = document.getElementById('chat-log');
   log.scrollTop = log.scrollHeight;
 }

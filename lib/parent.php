@@ -116,6 +116,10 @@ function nb_run_parent_job(PDO $pdo, array $job, array $config): array
         $error = $e->getMessage();
     }
 
+    // A resumed run reports the whole conversation's cost so far; this job's cost is the difference.
+    $sessionCost = is_array($res) && isset($res['total_cost_usd']) ? (float)$res['total_cost_usd'] : null;
+    $prevCost = $sid !== null ? (float)nb_setting($pdo, 'parent_session_cost', '0') : 0.0;
+    $jobCost = $sessionCost === null ? null : round(max(0.0, $sessionCost - $prevCost), 6);
     $denials = is_array($res) && is_array($res['permission_denials'] ?? null) ? $res['permission_denials'] : [];
     $newSid = is_array($res) ? (string)($res['session_id'] ?? '') : '';
     $debugFile = nb_write_job_debug([
@@ -128,7 +132,8 @@ function nb_run_parent_job(PDO $pdo, array $job, array $config): array
         'ok' => $ok,
         'error' => $error,
         'num_turns' => $res['num_turns'] ?? null,
-        'total_cost_usd' => $res['total_cost_usd'] ?? null,
+        'job_cost_usd' => $jobCost,
+        'session_cost_usd' => $sessionCost,
         'permission_denials' => $denials,
         'transcript' => nb_transcript_path($newSid ?: $sid),
         'raw_output' => $out,
@@ -136,7 +141,7 @@ function nb_run_parent_job(PDO $pdo, array $job, array $config): array
     $summary = [
         'ok' => $ok,
         'turns' => $res['num_turns'] ?? null,
-        'cost_usd' => $res['total_cost_usd'] ?? null,
+        'cost_usd' => $jobCost,
         'denials' => array_map('nb_describe_denial', $denials),
         'debug_file' => $debugFile,
     ];
@@ -156,6 +161,7 @@ function nb_run_parent_job(PDO $pdo, array $job, array $config): array
     $reply = trim((string)($res['result'] ?? ''));
     nb_setting_set($pdo, 'parent_session_id', $newSid !== '' ? $newSid : null);
     nb_setting_set($pdo, 'parent_turns', (string)($sid === null ? 1 : $turns + 1));
+    nb_setting_set($pdo, 'parent_session_cost', $sessionCost === null ? null : (string)$sessionCost);
     nb_chat_add($pdo, 'parent', $reply, $jobId);
     nb_job_finish($pdo, $jobId, true, $reply, null, $newSid);
     return $summary;

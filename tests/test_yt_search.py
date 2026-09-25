@@ -26,5 +26,10 @@ check(rows[0]["duration_s"] == 201.0 and rows[1]["duration_s"] is None, "duratio
 check(rows[0]["url"] == "https://www.youtube.com/watch?v=AAAAAAAAAAA", "url built")
 check(rows[0]["title"] == "Song A (Official Video)" and rows[0]["channel"] == "Artist A", "title and channel")
 
+import subprocess  # noqa: E402
+script = os.path.join(os.path.dirname(__file__), "..", "scripts", "yt_search.py")
+help_text = subprocess.run([sys.executable, script, "-h"], capture_output=True, text=True).stdout
+check("query" in help_text and "..." in help_text, "CLI accepts several queries")
+
 print("ALL PASSED" if fails == 0 else f"FAILED {fails}")
 sys.exit(1 if fails else 0)

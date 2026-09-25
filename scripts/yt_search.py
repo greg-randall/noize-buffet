@@ -1,7 +1,8 @@
 """Search YouTube with yt-dlp and print JSON results.
 
-Usage: python3 scripts/yt_search.py "artist song" [-n 5]
-Output: [{"video_id", "title", "channel", "duration_s", "url"}, ...]
+Usage: python3 scripts/yt_search.py "artist song" ["another artist song" ...] [-n 5]
+Output with one query: [{"video_id", "title", "channel", "duration_s", "url"}, ...]
+Output with several queries: {"query": [results...], ...} (searches run one after another)
 """
 import argparse
 import json
@@ -45,14 +46,20 @@ def search(query, n):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("query")
+    ap.add_argument("queries", nargs="+", metavar="query")
     ap.add_argument("-n", type=int, default=5, help="number of results (default 5)")
     args = ap.parse_args()
-    try:
-        print(json.dumps(search(args.query, args.n), ensure_ascii=False, indent=2))
-    except (RuntimeError, subprocess.TimeoutExpired, FileNotFoundError) as e:
-        print(json.dumps({"error": str(e)}))
-        sys.exit(1)
+    results = {}
+    failed = False
+    for q in args.queries:
+        try:
+            results[q] = search(q, args.n)
+        except (RuntimeError, subprocess.TimeoutExpired, FileNotFoundError) as e:
+            results[q] = {"error": str(e)}
+            failed = True
+    out = results[args.queries[0]] if len(args.queries) == 1 else results
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+    sys.exit(1 if failed else 0)
 
 
 if __name__ == "__main__":
