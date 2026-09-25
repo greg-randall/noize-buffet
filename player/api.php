@@ -1,0 +1,63 @@
+<?php
+declare(strict_types=1);
+require dirname(__DIR__) . '/lib/db.php';
+
+header('Content-Type: application/json; charset=utf-8');
+
+function respond(mixed $data, int $code = 200): never
+{
+    http_response_code($code);
+    echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
+function require_post(): array
+{
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        respond(['ok' => false, 'error' => 'POST required'], 405);
+    }
+    $in = json_decode((string)file_get_contents('php://input'), true);
+    if (!is_array($in)) {
+        respond(['ok' => false, 'error' => 'body must be a JSON object'], 400);
+    }
+    return $in;
+}
+
+try {
+    $pdo = nb_db();
+    switch ($_GET['action'] ?? '') {
+        case 'queue':
+            respond(nb_queue($pdo));
+
+        case 'save':
+            respond(['ok' => true, 'row' => nb_save_listen($pdo, require_post())]);
+
+        case 'chat':
+            respond(['messages' => nb_chat_since($pdo, (int)($_GET['after'] ?? 0)), 'jobs' => nb_job_status($pdo)]);
+
+        case 'send':
+            $message = trim((string)(require_post()['message'] ?? ''));
+            if ($message === '') {
+                respond(['ok' => false, 'error' => 'empty message'], 400);
+            }
+            $chatId = nb_chat_add($pdo, 'user', $message);
+            $jobId = nb_job_enqueue($pdo, 'chat', ['message' => $message]);
+            respond(['ok' => true, 'chat_id' => $chatId, 'job_id' => $jobId]);
+
+        case 'start':
+            require_post();
+            $empty = (int)$pdo->query('SELECT COUNT(*) FROM chat')->fetchColumn() === 0
+                && (int)$pdo->query('SELECT COUNT(*) FROM jobs')->fetchColumn() === 0;
+            if ($empty) {
+                nb_job_enqueue($pdo, 'interview');
+            }
+            respond(['ok' => true, 'started' => $empty]);
+
+        default:
+            respond(['ok' => false, 'error' => 'unknown action'], 400);
+    }
+} catch (InvalidArgumentException $e) {
+    respond(['ok' => false, 'error' => $e->getMessage()], 400);
+} catch (Throwable $e) {
+    respond(['ok' => false, 'error' => get_class($e) . ': ' . $e->getMessage()], 500);
+}
