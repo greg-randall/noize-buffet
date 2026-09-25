@@ -15,7 +15,7 @@ You chat with an AI agent in a local web page. It asks what you're after, then k
 
     python3 start.py
 
-It checks the requirements, creates `.env` if needed, starts the web server and the agent worker together, and prints the address (http://localhost:8000; use `NB_PORT=8080 python3 start.py` for another port). Ctrl+C stops both.
+It checks the requirements, creates `.env` if needed, starts the web server and the agent worker together, and prints the address: http://localhost:8000, or a random free port between 8001 and 8999 if 8000 is taken. `NB_PORT=8080 python3 start.py` uses exactly that port. Ctrl+C stops both.
 
 ## Where things live
 
