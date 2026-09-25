@@ -63,6 +63,8 @@ try {
             $empty = (int)$pdo->query('SELECT COUNT(*) FROM chat')->fetchColumn() === 0
                 && (int)$pdo->query('SELECT COUNT(*) FROM jobs')->fetchColumn() === 0;
             if ($empty) {
+                // Shown straight away: the agent's first real message takes a while (start-up, reading its files).
+                nb_chat_add($pdo, 'parent', 'Loading things up, one moment please…');
                 nb_job_enqueue($pdo, 'interview');
             }
             respond(['ok' => true, 'started' => $empty]);
