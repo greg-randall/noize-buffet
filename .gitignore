@@ -8,3 +8,5 @@ tests/tmp/
 __pycache__/
 brief.md
 taste.md
+*.json
+!config.json
