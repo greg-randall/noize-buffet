@@ -21,11 +21,47 @@ It checks the requirements, creates `.env` if needed, starts the web server and 
 
 To start over from scratch, run `python3 start.py --reset`. It stops this folder's old server, worker and agent processes, then **permanently deletes** your queue, ratings, notes, chat, `brief.md` and `taste.md` (after you type `RESET` to confirm), and starts fresh. `.env` and `config.json` are kept.
 
+## How it works
+
+```mermaid
+flowchart LR
+    you(("You")) -->|"listen, rate, chat"| page["Web page (player/)"]
+    page -->|"saves ratings, queues chat messages"| db[("data/music.sqlite")]
+    worker["Job worker (scripts/job_worker.php)"] -->|"takes the next job"| db
+    worker -->|"one message at a time"| agent["Agent: a long-lived claude process"]
+    agent -->|"bin/nb.php"| db
+    agent -->|"reads and updates"| files["brief.md, taste.md"]
+    agent -->|"scripts/yt_search.py"| yt[("YouTube, via yt-dlp")]
+    agent -->|"web search and fetch"| web[("Bandcamp, Last.fm, Discogs, ...")]
+```
+
+`start.py` runs two things: a small PHP web server for the page, and a **job worker**. Everything you do in the page goes into a local SQLite database. When you send a chat message, it becomes a job; the worker hands jobs one at a time to the **agent**, a headless Claude Code session that stays running between messages so replies come back quickly. The agent follows the rulebook in [`CLAUDE.md`](CLAUDE.md).
+
+**What happens, step by step:**
+
+1. **Interview.** On first run the agent asks, one question at a time, what you're hoping to find, a few songs you love and why, and what you don't want. It looks up the songs and artists you named and checks anything unclear with you. Then it writes `brief.md` (your goal, in your words) and `taste.md` (its notes on your taste).
+2. **A batch of songs.** The agent researches on the web before choosing: each seed song's label and roster, its producers and collaborators, similar-artist pages, and scenes. One person's recommendation isn't enough on its own; it needs a second, independent signal. It finds each song on YouTube with `yt_search.py` and adds about 12 to the queue (mostly close to what you like, some from its leads, one wildcard to test an edge). Every song records **why** it's there and the page that led to it.
+3. **Listening.** The page plays the queue and records how far you got in each song, your rating (top, yes, good, ok, meh, no), whether it was new to you, and whether it's good but not what you're looking for ("off-brief").
+4. **Talking.** Tell the agent what you think of the song that's playing ("love the drums", "the vocals are generic"). It saves your comment as a note on that song, fills in the rating and toggles your comment implies (you can change them), and updates `taste.md`. You can also paste a song you found, ask for more songs, or ask it to stop suggesting an artist.
+5. **The next batch** starts from your ratings, notes and chat since the last one, plus the leads it has already collected, so it keeps moving toward what you like.
+
+While the agent works, the chat shows what it's doing ("Searching YouTube (12 songs)…", "Reading bandcamp.com…").
+
+**Memory.** The agent's conversation is restarted after `session_rotate_turns` messages (and after any error). Nothing important lives only in the conversation: what it knows about you is in `brief.md`, `taste.md` and the database. Every new conversation starts by reading the two files, and each batch starts by reading your latest feedback from the database.
+
+**The agent is fenced in.** It works in this folder only: it can read and edit files here, but anything outside the folder is refused. Its only shell commands are `php bin/nb.php …` (the database) and `python3 scripts/yt_search.py …`; everything else is blocked, and blocked attempts show up in the chat. It ignores your own Claude Code setup (your `CLAUDE.md` files, hooks, memory and skills), so it behaves the same for everyone.
+
+**Time and cost.** Measured on one run: chat replies took about 8 seconds, and a first batch with web research took about 4 minutes. The agent runs on whatever account Claude Code is logged in with. On a Claude subscription that counts toward your plan's usage limits; with an API key it's billed. The worker prints each job's API-equivalent cost so you can see what's heavy: about $0.05 per chat reply and about $1 for that researched first batch.
+
+**Not built yet:** batches refill automatically when the queue runs low (for now, ask the agent for more songs), and mining the YouTube comments of songs you love for new leads.
+
 ## Where things live
 
-- `brief.md`, `taste.md`: what you're after and what the agent has learned (you can edit both)
-- `data/music.sqlite`: your queue and listening history (never committed)
-- `config.json`: batch size, mix and model settings
+- `brief.md`, `taste.md`: what you're after and what the agent has learned (you can edit both; your edits count as things you said)
+- `data/music.sqlite`: your queue, listening history, notes and chat (never committed)
+- `config.json`: `batch_size`; `mix` (share of close, lead and wildcard songs); `parent_model` (the Claude model the agent uses); `memory_picks` (most songs per batch the agent may suggest from its own memory rather than research); `session_rotate_turns`; `job_timeout_s`
+- `CLAUDE.md`: the agent's rulebook
+- `player/`: the web page; `scripts/job_worker.php`: the worker; `bin/nb.php`: the agent's database commands; `scripts/yt_search.py`: YouTube search; `lib/`: shared PHP
 
 ## Tests
 
