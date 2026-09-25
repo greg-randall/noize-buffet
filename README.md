@@ -17,6 +17,8 @@ You chat with an AI agent in a local web page. It asks what you're after, then k
 
 It checks the requirements, creates `.env` if needed, starts the web server and the agent worker together, and prints the address: http://localhost:8000, or a random free port between 8001 and 8999 if 8000 is taken. `NB_PORT=8080 python3 start.py` uses exactly that port. Ctrl+C stops both.
 
+To start over from scratch, run `python3 start.py --reset`. It stops this folder's old server, worker and agent processes, then **permanently deletes** your queue, ratings, notes, chat, `brief.md` and `taste.md` (after you type `RESET` to confirm), and starts fresh. `.env` and `config.json` are kept.
+
 ## Where things live
 
 - `brief.md`, `taste.md`: what you're after and what the agent has learned (you can edit both)
