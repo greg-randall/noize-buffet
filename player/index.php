@@ -10,7 +10,7 @@
     #player-wrap iframe, #player { width: 100%; height: 100%; }
     #queue-list tr { cursor: pointer; }
     #queue-list td.num { width: 2.5rem; }
-    /* The playlist scrolls on its own, so the current song can sit at the top (see scrollQueueToCurrent). */
+    /* The playlist scrolls on its own, so the current song can sit at the top (see markCurrent in app.js). */
     #queue-scroll { position: relative; max-height: 45vh; overflow-y: auto; }
     #queue-scroll thead th { position: sticky; top: 0; z-index: 1; background: var(--bs-body-bg); }
     /* Read-only: shown as a quote, not a box, so it doesn't look editable. */
@@ -91,7 +91,7 @@
 
       <div id="queue-scroll" class="mt-3">
         <table class="table table-sm table-hover mb-0">
-          <thead><tr><th>#</th><th>Artist</th><th>Song</th><th>Batch</th><th>Rating</th><th>Heard</th></tr></thead>
+          <thead><tr><th>#</th><th>Artist</th><th>Song</th><th>Why</th><th>Rating</th><th>Heard</th></tr></thead>
           <tbody id="queue-list"></tbody>
         </table>
       </div>

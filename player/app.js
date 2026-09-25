@@ -99,7 +99,7 @@ function renderQueue() {
   state.songs.forEach((s, idx) => {
     $('<tr>').attr('data-idx', idx).append(
       $('<td class="num">'), $('<td>').text(s.artist), $('<td>').text(s.title),
-      $('<td class="small text-secondary">').text(s.batch_summary || ''),
+      $('<td class="small text-secondary">').text(s.reason || ''),
       $('<td class="rating">'), $('<td class="heard">')).appendTo($tb);
     renderRow(idx);
   });
