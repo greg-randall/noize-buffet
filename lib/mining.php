@@ -76,6 +76,44 @@ function nb_append_jsonl(string $path, string $line): bool
     return $result !== false;
 }
 
+/** Restore a protected file from a snapshot, verifying temp file location, write length, and file mode. */
+function nb_restore_file(string $workDir, string $path, string $bytes, int $mode): bool
+{
+    $tempFile = tempnam($workDir, '.nbrestore');
+    if ($tempFile === false) {
+        return false;
+    }
+
+    // Verify temp file is in the correct directory
+    $tempDir = realpath(rtrim($workDir, '/'));
+    $actualTempDir = realpath(dirname($tempFile));
+    if ($tempDir === false || $actualTempDir === false || $tempDir !== $actualTempDir) {
+        @unlink($tempFile);
+        return false;
+    }
+
+    // Write the bytes and verify write length
+    $written = file_put_contents($tempFile, $bytes);
+    if ($written !== strlen($bytes)) {
+        @unlink($tempFile);
+        return false;
+    }
+
+    // Restore file mode
+    if (!chmod($tempFile, $mode)) {
+        @unlink($tempFile);
+        return false;
+    }
+
+    // Rename to target path
+    if (!rename($tempFile, $path)) {
+        @unlink($tempFile);
+        return false;
+    }
+
+    return true;
+}
+
 /** Find the `timeout` command by scanning PATH (no shell). Skip relative entries. */
 function nb_find_timeout(): ?string
 {
@@ -361,7 +399,7 @@ function nb_run_child(string $chunk, string $workDir, array $config): array
                 }
                 return $summary;
             }
-            $snapshot[$name] = ['hash' => sha1_file($path), 'bytes' => $bytes];
+            $snapshot[$name] = ['hash' => sha1_file($path), 'bytes' => $bytes, 'mode' => fileperms($path) & 0777];
         } else {
             $snapshot[$name] = null;
         }
@@ -408,7 +446,7 @@ function nb_run_child(string $chunk, string $workDir, array $config): array
                             }
                             return $summary;
                         }
-                        $snapshot[$f] = ['hash' => sha1_file($path), 'bytes' => $bytes];
+                        $snapshot[$f] = ['hash' => sha1_file($path), 'bytes' => $bytes, 'mode' => fileperms($path) & 0777];
                     } else {
                         $snapshot[$f] = null;
                     }
@@ -458,7 +496,7 @@ function nb_run_child(string $chunk, string $workDir, array $config): array
                             }
                             return $summary;
                         }
-                        $snapshot[$f] = ['hash' => sha1_file($path), 'bytes' => $bytes];
+                        $snapshot[$f] = ['hash' => sha1_file($path), 'bytes' => $bytes, 'mode' => fileperms($path) & 0777];
                     } else {
                         $snapshot[$f] = null;
                     }
@@ -606,17 +644,9 @@ function nb_run_child(string $chunk, string $workDir, array $config): array
                 // Now it's a symlink - tampering
                 $tampered[] = $name;
                 $tamperDetected = true;
-                // Restore using tempnam + rename pattern to avoid following symlinks
-                $tempFile = @tempnam($workDir, '.nbrestore');
-                if ($tempFile === false) {
+                // Restore using helper
+                if (!nb_restore_file($workDir, $path, $original['bytes'], $original['mode'])) {
                     $restoreFailed[] = $name;
-                } else {
-                    if (file_put_contents($tempFile, $original['bytes']) !== false && @rename($tempFile, $path)) {
-                        // Restored successfully
-                    } else {
-                        $restoreFailed[] = $name;
-                        @unlink($tempFile);
-                    }
                 }
             } elseif (!is_file($path)) {
                 // Not a regular file (could be deleted, dir, etc.) - tampering
@@ -628,31 +658,15 @@ function nb_run_child(string $chunk, string $workDir, array $config): array
                     $restoreFailed[] = $name;
                 } else {
                     // Try to restore
-                    $tempFile = @tempnam($workDir, '.nbrestore');
-                    if ($tempFile === false) {
+                    if (!nb_restore_file($workDir, $path, $original['bytes'], $original['mode'])) {
                         $restoreFailed[] = $name;
-                    } else {
-                        if (file_put_contents($tempFile, $original['bytes']) !== false && @rename($tempFile, $path)) {
-                            // Restored successfully
-                        } else {
-                            $restoreFailed[] = $name;
-                            @unlink($tempFile);
-                        }
                     }
                 }
             } elseif (sha1_file($path) !== $original['hash']) {
                 // File modified - tampering
                 $tampered[] = $name;
-                $tempFile = @tempnam($workDir, '.nbrestore');
-                if ($tempFile === false) {
+                if (!nb_restore_file($workDir, $path, $original['bytes'], $original['mode'])) {
                     $restoreFailed[] = $name;
-                } else {
-                    if (file_put_contents($tempFile, $original['bytes']) !== false && @rename($tempFile, $path)) {
-                        // Restored successfully
-                    } else {
-                        $restoreFailed[] = $name;
-                        @unlink($tempFile);
-                    }
                 }
             }
         }
