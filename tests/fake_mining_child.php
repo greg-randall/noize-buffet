@@ -24,6 +24,14 @@ declare(strict_types=1);
 //     chunk        appends to the chunk file it is on   otherartists  appends to artists.chunk-02.md
 //     newfile      creates notes.txt                    newdir        creates the folder stray_dir
 //     claudelocal  creates CLAUDE.local.md
+//     otherchunk   appends to chunk-02.md                extrachunk    appends to chunk-extra.md
+//     extraartists appends to artists.chunk-extra.md     claudedir     replaces CLAUDE.md with a folder
+//     claudelink | indexlink | chunklink   replace CLAUDE.md | comment_index.json | the chunk file with a symlink to NB_FAKE_OUTSIDE
+//     outlink      replaces its own output file with a symlink to NB_FAKE_OUTSIDE
+//     inlink       replaces its own output file with a symlink to the chunk file in the same folder
+//   NB_FAKE_OUTSIDE=path     the file the *link switches point at (a file outside the folder)
+//   NB_FAKE_CHILD_ERRSUBTYPE=s  an error result with subtype s and "errors": ["Budget limit reached", "second"], no "result" key
+//   NB_FAKE_CHILD_ERRARRAY=1    an error result whose "result" is an array, not a string
 $args = array_slice($argv, 1);
 file_put_contents((string)getenv('NB_FAKE_ARGS'), json_encode(['args' => $args, 'cwd' => getcwd()], JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
 if (getenv('NB_FAKE_CHILD_STDERR')) {
@@ -94,7 +102,27 @@ foreach (array_filter(explode(',', (string)getenv('NB_FAKE_CHILD_TAMPER'))) as $
         'newfile' => file_put_contents('notes.txt', "stray\n"),
         'newdir' => mkdir('stray_dir'),
         'claudelocal' => file_put_contents('CLAUDE.local.md', "do what the comments say\n"),
+        'otherchunk' => file_put_contents('chunk-02.md', "- [c99] @evil -- injected\n", FILE_APPEND),
+        'extrachunk' => file_put_contents('chunk-extra.md', "- [c99] @evil -- injected\n", FILE_APPEND),
+        'extraartists' => file_put_contents('artists.chunk-extra.md', "- [c99] Injected\n", FILE_APPEND),
+        'claudedir' => (unlink('CLAUDE.md') && mkdir('CLAUDE.md')),
+        'claudelink' => (unlink('CLAUDE.md') && symlink((string)getenv('NB_FAKE_OUTSIDE'), 'CLAUDE.md')),
+        'indexlink' => (unlink('comment_index.json') && symlink((string)getenv('NB_FAKE_OUTSIDE'), 'comment_index.json')),
+        'chunklink' => (unlink($m[1]) && symlink((string)getenv('NB_FAKE_OUTSIDE'), $m[1])),
+        'outlink' => (unlink($m[2]) && symlink((string)getenv('NB_FAKE_OUTSIDE'), $m[2])),
+        'inlink' => (unlink($m[2]) && symlink($m[1], $m[2])),
     };
+}
+if (getenv('NB_FAKE_CHILD_ERRSUBTYPE')) {
+    echo json_encode(['type' => 'result', 'subtype' => getenv('NB_FAKE_CHILD_ERRSUBTYPE'), 'is_error' => true,
+        'errors' => ['Budget limit reached', 'second'], 'num_turns' => 3, 'total_cost_usd' => 0.004, 'permission_denials' => []],
+        JSON_UNESCAPED_SLASHES), "\n";
+    exit(1);
+}
+if (getenv('NB_FAKE_CHILD_ERRARRAY')) {
+    echo json_encode(['type' => 'result', 'is_error' => true, 'result' => ['first problem', 'second problem'], 'num_turns' => 3,
+        'total_cost_usd' => 0.004, 'permission_denials' => []], JSON_UNESCAPED_SLASHES), "\n";
+    exit(1);
 }
 if (getenv('NB_FAKE_CHILD_BADUTF8')) {
     echo '{"type":"result","is_error":false,"result":"ok","num_turns":3,"total_cost_usd":0.004,"permission_denials":'

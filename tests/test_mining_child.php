@@ -33,7 +33,34 @@ $opt = function (array $a, string $flag) {
     $i = array_search($flag, $a, true);
     return $i === false ? null : ($a[$i + 1] ?? null);
 };
-$jsonl = fn(string $file): array => array_map(fn($l) => json_decode($l, true), file($file, FILE_IGNORE_NEW_LINES) ?: []);
+/** Run $f and return [its result, the PHP warnings and notices it raised]. */
+$capture = function (callable $f): array {
+    $warnings = [];
+    set_error_handler(function (int $no, string $str) use (&$warnings) {
+        if (error_reporting() & $no) { // not one that an @ silenced
+            $warnings[] = $str;
+        }
+        return true;
+    });
+    try {
+        $value = $f();
+    } finally {
+        restore_error_handler();
+    }
+    return [$value, $warnings];
+};
+$jsonl = fn(string $file): array => array_map(fn($l) => json_decode($l, true), is_file($file) ? (file($file, FILE_IGNORE_NEW_LINES) ?: []) : []);
+/** Does $f throw an InvalidArgumentException (and not something else, or nothing)? */
+$refuses = function (callable $f): bool {
+    try {
+        $f();
+    } catch (InvalidArgumentException $e) {
+        return true;
+    } catch (Throwable $e) {
+        return false;
+    }
+    return false;
+};
 
 $argsFile = tmp_dir() . '/fake_child_args.jsonl';
 @unlink($argsFile);
@@ -139,6 +166,93 @@ check($r['exit'] === 4 && $r['timed_out'] === false, 'a command that fails befor
 $t = microtime(true);
 $r = nb_run_logged(['bash', '-c', 'exec sleep 30'], $logDir, $log, 1.0, 30.0);
 check($r['timed_out'] === true && $r['exit'] === null && microtime(true) - $t < 5, 'a command that dies at SIGTERM is not made to wait out the kill grace period');
+
+echo "exit codes that look like a timeout but are not\n";
+foreach (['exit 9' => 9, 'exit 143' => 143, 'exit 137' => 137, 'exit 124' => 124] as $script => $code) {
+    $r = nb_run_logged(['bash', '-c', $script], $logDir, $log, 30.0);
+    check($r['timed_out'] === false && $r['exit'] === $code, "a command that quickly does `$script` is a plain failure with exit $code, not a timeout");
+}
+$r = nb_run_logged(['bash', '-c', 'kill -9 $$'], $logDir, $log, 30.0);
+check($r['timed_out'] === false && is_int($r['exit']) && $r['exit'] !== 0, 'a command that is killed by SIGKILL long before its limit is not reported as timed out, and keeps a real exit code');
+$r = nb_run_logged(['bash', '-c', 'exit 143'], $logDir, $log);
+check($r['timed_out'] === false && $r['exit'] === 143, 'with no limit at all, exit 143 is just exit 143');
+
+echo "time limits must be positive\n";
+foreach ([['timeout 0.0', 0.0, 5.0], ['a negative timeout', -1.0, 5.0], ['a negative kill-after', 5.0, -1.0]] as $n => [$what, $limit, $grace]) {
+    $marker = "$logDir/ran_$n.txt";
+    $freshLog = "$logDir/never_made_$n.log";
+    check($refuses(fn() => nb_run_logged(['bash', '-c', 'echo ran > "$1"', 'bash', $marker], $logDir, $freshLog, $limit, $grace)),
+        "$what is refused with an InvalidArgumentException");
+    check(!file_exists($marker) && !file_exists($freshLog), "$what: nothing was run and no log was opened");
+}
+$dir = $video('limits');
+file_put_contents("$dir/chunk-01.md", "# T\n\n- [c1] @a -- Burial vibes\n");
+$runsBefore = count($jsonl($argsFile));
+foreach ([0, -5] as $bad) {
+    [$r, $warnings] = $capture(fn() => nb_run_child('chunk-01.md', $dir, ['mining_child_timeout_s' => $bad] + $config));
+    check($r['ok'] === false && stripos((string)$r['error'], 'timeout') !== false && array_keys($r) === ['chunk', 'ok', 'error', 'duration_s', 'cost_usd', 'turns', 'denials', 'tampered'],
+        "mining_child_timeout_s $bad: a not-ok summary whose error mentions the timeout setting");
+    check($warnings === [], "mining_child_timeout_s $bad: no PHP warnings");
+}
+check(count($jsonl($argsFile)) === $runsBefore, 'and no child was started');
+foreach ([0.0, -1.0] as $bad) {
+    $covLog0 = "$dir/never_made_coverage_" . (int)$bad . '.log';
+    check($refuses(fn() => nb_coverage($dir, false, $covLog0, $bad)) && !file_exists($covLog0),
+        "nb_coverage with a limit of $bad is refused with an InvalidArgumentException, before anything runs");
+}
+
+echo "finding timeout without a shell\n";
+$realTimeout = null;
+foreach (explode(':', (string)getenv('PATH')) as $d) {
+    if ($realTimeout === null && $d !== '' && is_file("$d/timeout") && is_executable("$d/timeout")) {
+        $realTimeout = "$d/timeout";
+    }
+}
+$binDir = $video('path_timeout_script');
+$marker = "$binDir/wrapper_ran.txt";
+file_put_contents("$binDir/timeout", "#!/bin/sh\necho ran >> " . escapeshellarg($marker) . "\nexec " . escapeshellarg((string)$realTimeout) . " \"\$@\"\n");
+chmod("$binDir/timeout", 0755);
+$oldPath = getenv('PATH');
+putenv("PATH=$binDir"); // no `which`, no coreutils: only a `timeout` script
+try {
+    $r = nb_run_logged([PHP_BINARY, '-r', 'echo "through the PATH timeout";'], $logDir, $log, 10.0);
+    $viaPath = $r['out'] === 'through the PATH timeout' && $r['exit'] === 0 && $r['timed_out'] === false;
+} catch (Throwable $e) {
+    $viaPath = false;
+} finally {
+    putenv("PATH=$oldPath");
+}
+check($viaPath && is_file($marker), 'an executable `timeout` found by scanning PATH is used, even with no `which` available');
+$msgs = [];
+$fakeWhich = $video('path_fake_which');
+file_put_contents("$fakeWhich/which", "#!/bin/sh\necho \"which: no timeout in (\$PATH)\" >&2\nexit 1\n");
+chmod("$fakeWhich/which", 0755);
+$notExec = $video('path_not_executable');
+file_put_contents("$notExec/timeout", "#!/bin/sh\nexit 0\n");
+chmod("$notExec/timeout", 0644);
+$dirNamed = $video('path_dir_named_timeout');
+mkdir("$dirNamed/timeout");
+clearstatcache();
+$pathCases = ['empty' => $video('path_empty'), 'fake_which' => $fakeWhich, 'a_folder' => $dirNamed];
+if (is_executable("$notExec/timeout")) {
+    check(true, 'skipped the non-executable timeout check: this filesystem ignores chmod');
+} else {
+    $pathCases['not_executable'] = $notExec;
+}
+foreach ($pathCases as $what => $pathDir) {
+    putenv("PATH=$pathDir");
+    try {
+        nb_run_logged([PHP_BINARY, '-r', 'echo "x";'], $logDir, $log, 10.0);
+        $msgs[$what] = null;
+    } catch (RuntimeException $e) {
+        $msgs[$what] = $e->getMessage();
+    } finally {
+        putenv("PATH=$oldPath");
+    }
+    check($msgs[$what] !== null && str_contains($msgs[$what], 'timeout') && str_contains($msgs[$what], 'GNU coreutils'),
+        "PATH with no usable timeout ($what): a RuntimeException naming timeout and GNU coreutils");
+}
+check(($msgs['empty'] ?? 'a') === ($msgs['fake_which'] ?? 'b'), 'the message is the same whether or not `which` has something to say about timeout');
 
 echo "no GNU timeout\n";
 $pathOnly = $video('path_with_only_php');
@@ -457,6 +571,179 @@ putenv('NB_FAKE_CHILD_TAMPER');
 $r = nb_run_child('chunk-01.md', $dir, $config);
 check($r['ok'] === true && ($r['tampered'] ?? null) === [], 'a stray file left by an earlier run is not blamed on the next run');
 
+echo "every chunk file is protected\n";
+$protectedAll = array_merge($protected, ['chunk-02.md', 'chunk-extra.md', 'artists.chunk-extra.md']);
+/** The same folder, with more chunk files and another output file in it. */
+$tamperDirAll = function (string $name) use ($tamperDir): string {
+    $dir = $tamperDir($name);
+    file_put_contents("$dir/chunk-02.md", "# T\n\n- [c9] @z -- another chunk\n");
+    file_put_contents("$dir/chunk-extra.md", "# T\n\n- [c8] @y -- the re-run chunk\n");
+    file_put_contents("$dir/artists.chunk-extra.md", "- [c8] Earlier extra\n");
+    return $dir;
+};
+$contentsOf = function (string $dir, array $names): array {
+    $out = [];
+    foreach ($names as $f) {
+        $out[$f] = is_file("$dir/$f") && !is_link("$dir/$f") ? file_get_contents("$dir/$f") : null;
+    }
+    return $out;
+};
+foreach ([
+    'otherchunk' => ['chunk-02.md'],
+    'extrachunk' => ['chunk-extra.md'],
+    'extraartists' => ['artists.chunk-extra.md'],
+    'otherchunk,extrachunk' => ['chunk-02.md', 'chunk-extra.md'],
+] as $what => $paths) {
+    $dir = $tamperDirAll('all_' . str_replace(',', '_', $what));
+    $before = $contentsOf($dir, $protectedAll);
+    putenv("NB_FAKE_CHILD_TAMPER=$what");
+    $r = nb_run_child('chunk-01.md', $dir, $config);
+    putenv('NB_FAKE_CHILD_TAMPER');
+    $tampered = $r['tampered'] ?? null;
+    is_array($tampered) && sort($tampered);
+    check($r['ok'] === false && $tampered === $paths, "$what: not ok, tampered lists " . implode(', ', $paths));
+    check($contentsOf($dir, $protectedAll) === $before, "$what: every chunk and output file is back byte for byte");
+}
+$dir = $tamperDirAll('all_none');
+$r = nb_run_child('chunk-01.md', $dir, $config);
+check($r['ok'] === true && ($r['tampered'] ?? null) === [], 'with all those files in the folder a normal run is still ok, nothing tampered');
+$dir = $video('chunk_absent');
+[$r, $warnings] = $capture(fn() => nb_run_child('chunk-01.md', $dir, $config));
+check($r['ok'] === false && ($r['tampered'] ?? null) === [] && $warnings === [], 'a run whose chunk file is absent gives a not-ok summary (from the child), nothing tampered, no PHP warnings');
+check($refuses(fn() => nb_run_child("chunk-01.md\n", $dir, $config)), 'a chunk name with a trailing newline is refused');
+
+echo "symlinks are never followed\n";
+$outside = "$base/outside_target.txt";
+$outsideText = "OUTSIDE FILE: nobody may change this\n";
+$symlinkable = [
+    'CLAUDE.md', 'comment_index.json', 'music_mentions_flagged.json', 'chunk-01.md', 'chunk-02.md', 'artists.chunk-02.md',
+];
+foreach ($symlinkable as $name) {
+    $dir = $tamperDirAll('presym_' . preg_replace('/\W/', '_', $name));
+    file_put_contents($outside, $outsideText);
+    $original = file_get_contents("$dir/$name");
+    rename("$dir/$name", "$dir/moved_away.txt"); // make room for the symlink; nothing is removed
+    symlink($outside, "$dir/$name");
+    $runsBefore = count($jsonl($argsFile));
+    [$r, $warnings] = $capture(fn() => nb_run_child('chunk-01.md', $dir, $config));
+    check($r['ok'] === false && str_starts_with((string)$r['error'], "refusing to run: protected file is a symlink: $name")
+        && array_keys($r) === ['chunk', 'ok', 'error', 'duration_s', 'cost_usd', 'turns', 'denials', 'tampered'],
+        "$name is a symlink before the run: refusing to run, with a normal not-ok summary");
+    check(count($jsonl($argsFile)) === $runsBefore, "$name: the child was never started");
+    check(file_get_contents($outside) === $outsideText && is_link("$dir/$name") && $warnings === [], "$name: the symlink and its target are untouched, and there were no PHP warnings");
+}
+$dir = $tamperDirAll('presym_dangling');
+rename("$dir/CLAUDE.md", "$dir/moved_away.txt");
+symlink("$base/does_not_exist_anywhere.txt", "$dir/CLAUDE.md");
+$runsBefore = count($jsonl($argsFile));
+$r = nb_run_child('chunk-01.md', $dir, $config);
+check($r['ok'] === false && str_starts_with((string)$r['error'], 'refusing to run: protected file is a symlink: CLAUDE.md') && count($jsonl($argsFile)) === $runsBefore,
+    'a dangling symlink counts too');
+$dir = $tamperDirAll('unreadable');
+chmod("$dir/CLAUDE.md", 0);
+clearstatcache();
+if (is_readable("$dir/CLAUDE.md")) {
+    chmod("$dir/CLAUDE.md", 0644);
+    check(true, 'skipped the unreadable-file check: chmod 000 does not stop reading here (root, or a filesystem that ignores chmod)');
+} else {
+    $runsBefore = count($jsonl($argsFile));
+    [$r, $warnings] = $capture(fn() => nb_run_child('chunk-01.md', $dir, $config));
+    chmod("$dir/CLAUDE.md", 0644);
+    check($r['ok'] === false && str_starts_with((string)$r['error'], 'refusing to run: ') && str_contains((string)$r['error'], 'CLAUDE.md'),
+        'a protected file that cannot be read: refusing to run, naming the file');
+    check(count($jsonl($argsFile)) === $runsBefore && $warnings === [], 'and the child was never started, with no PHP warnings');
+}
+$dir = $tamperDirAll('presym_output');
+file_put_contents($outside, $outsideText);
+symlink($outside, "$dir/artists.chunk-01.md");
+$r = nb_run_child('chunk-01.md', $dir, $config);
+check($r['ok'] === true && !is_link("$dir/artists.chunk-01.md") && file_get_contents($outside) === $outsideText,
+    'an old output that is a symlink is removed (the link, not its target) before the run');
+
+$outsideCopy = "$base/outside_copy_of_claude.txt";
+foreach ([
+    'claudelink' => ['CLAUDE.md', null],
+    'claudelink_same_bytes' => ['CLAUDE.md', 'copy'],
+    'indexlink' => ['comment_index.json', null],
+    'chunklink' => ['chunk-01.md', null],
+] as $what => [$name, $mode]) {
+    $dir = $tamperDirAll('link_' . $what);
+    $before = $contentsOf($dir, $protectedAll);
+    if ($mode === 'copy') {
+        file_put_contents($outsideCopy, $before[$name]);
+        $target = $outsideCopy;
+    } else {
+        file_put_contents($outside, $outsideText);
+        $target = $outside;
+    }
+    $targetBefore = file_get_contents($target);
+    putenv("NB_FAKE_OUTSIDE=$target");
+    putenv('NB_FAKE_CHILD_TAMPER=' . preg_replace('/_.*/', '', $what));
+    [$r, $warnings] = $capture(fn() => nb_run_child('chunk-01.md', $dir, $config));
+    putenv('NB_FAKE_CHILD_TAMPER');
+    putenv('NB_FAKE_OUTSIDE');
+    check($r['ok'] === false && ($r['tampered'] ?? null) === [$name], "$what: not ok, tampered lists $name");
+    check(!is_link("$dir/$name") && is_file("$dir/$name") && file_get_contents("$dir/$name") === $before[$name], "$what: the link is gone and $name is a regular file with its original bytes again");
+    check(file_get_contents($target) === $targetBefore, "$what: the file outside the folder is byte for byte unchanged");
+    check($contentsOf($dir, $protectedAll) === $before && $warnings === [], "$what: nothing else changed, no PHP warnings");
+}
+
+echo "the output must be a regular file in the folder\n";
+foreach (['outlink' => 'a symlink to a file outside the folder', 'inlink' => 'a symlink to a file in the folder'] as $what => $desc) {
+    $dir = $tamperDirAll("output_$what");
+    file_put_contents($outside, $outsideText);
+    putenv("NB_FAKE_OUTSIDE=$outside");
+    putenv("NB_FAKE_CHILD_TAMPER=$what");
+    $r = nb_run_child('chunk-01.md', $dir, $config);
+    putenv('NB_FAKE_CHILD_TAMPER');
+    putenv('NB_FAKE_OUTSIDE');
+    check($r['ok'] === false && in_array('artists.chunk-01.md', $r['tampered'] ?? [], true), "output replaced by $desc: not ok, and listed in tampered");
+    check(str_starts_with((string)$r['error'], 'child changed files it must not touch: ') && str_contains((string)$r['error'], 'artists.chunk-01.md'), "$what: the error says so");
+    check(file_get_contents($outside) === $outsideText, "$what: the file outside the folder is unchanged");
+}
+$dir = $tamperDirAll('output_regular');
+$r = nb_run_child('chunk-01.md', $dir, $config);
+check($r['ok'] === true && is_file("$dir/artists.chunk-01.md") && !is_link("$dir/artists.chunk-01.md"), 'a regular non-empty output is still ok');
+
+echo "error text from error results\n";
+$dir = $video('errtext');
+file_put_contents("$dir/chunk-01.md", "# T\n\n- [c1] @a -- Burial vibes\n");
+putenv('NB_FAKE_CHILD_ERRSUBTYPE=error_max_budget_usd');
+[$r, $warnings] = $capture(fn() => nb_run_child('chunk-01.md', $dir, $config));
+putenv('NB_FAKE_CHILD_ERRSUBTYPE');
+check($r['ok'] === false && str_contains((string)$r['error'], 'error_max_budget_usd') && str_contains((string)$r['error'], 'Budget limit reached')
+    && str_contains((string)$r['error'], 'second'), 'an error result with no "result" gives an error with the subtype and every message in "errors"');
+check($warnings === [], 'and no PHP warnings');
+putenv('NB_FAKE_CHILD_ERRARRAY=1');
+[$r, $warnings] = $capture(fn() => nb_run_child('chunk-01.md', $dir, $config));
+putenv('NB_FAKE_CHILD_ERRARRAY');
+check($r['ok'] === false && is_string($r['error']) && $r['error'] !== '' && $r['error'] !== 'Array', 'an error result whose "result" is an array gives a sensible string error');
+check($warnings === [], 'and no "Array to string conversion" warning');
+putenv('NB_FAKE_CHILD_EXIT=124');
+$r = nb_run_child('chunk-01.md', $dir, $config);
+putenv('NB_FAKE_CHILD_EXIT');
+check($r['ok'] === false && !str_contains((string)$r['error'], 'timed out') && str_contains((string)$r['error'], '124'), 'a child that quickly exits 124 failed with exit 124; it did not time out');
+
+echo "what the tamper list says\n";
+$dir = $video('newprotected');
+file_put_contents("$dir/chunk-01.md", "# T\n\n- [c1] @a -- Burial vibes\n");
+copy(nb_root() . '/mining/child_CLAUDE.md', "$dir/CLAUDE.md");
+putenv('NB_FAKE_CHILD_TAMPER=index'); // comment_index.json did not exist; the child creates it
+[$r, $warnings] = $capture(fn() => nb_run_child('chunk-01.md', $dir, $config));
+putenv('NB_FAKE_CHILD_TAMPER');
+check(($r['tampered'] ?? null) === ['comment_index.json'], 'a protected file that did not exist and was created by the child is listed once');
+check(substr_count((string)$r['error'], 'comment_index.json') === 1 && $warnings === [], 'and named once in the error, with no PHP warnings');
+$dir = $tamperDirAll('claudedir');
+$before = $contentsOf($dir, $protectedAll);
+putenv('NB_FAKE_CHILD_TAMPER=claudedir');
+[$r, $warnings] = $capture(fn() => nb_run_child('chunk-01.md', $dir, $config));
+putenv('NB_FAKE_CHILD_TAMPER');
+check($r['ok'] === false && ($r['tampered'] ?? null) === ['CLAUDE.md'], 'a protected file replaced by a folder is listed once');
+check(str_starts_with((string)$r['error'], 'child changed files it must not touch: ') && str_contains((string)$r['error'], 'could not restore CLAUDE.md'), 'and the error says "could not restore CLAUDE.md"');
+check(is_dir("$dir/CLAUDE.md") && $warnings === [], 'the folder is left where it is, and there were no PHP warnings');
+$after = $contentsOf($dir, array_diff($protectedAll, ['CLAUDE.md']));
+check($after === array_diff_key($before, ['CLAUDE.md' => 1]), 'the other protected files are untouched');
+
 echo "permission denials\n";
 $dir = $video('denials');
 file_put_contents("$dir/chunk-01.md", "# T\n\n- [c1] @a -- Burial vibes\n");
@@ -492,6 +779,14 @@ $cases = [
     ["TYPESAFE_API=''\n", false, 'a key of just two single quotes is no key'],
     ["TYPESAFE_API=\"abc123\"\n", true, 'a double-quoted key'],
     ["TYPESAFE_API='abc123'\n", true, 'a single-quoted key'],
+    ["TYPESAFE_API=\"\"\r\n", false, 'two double quotes, Windows line endings'],
+    ["TYPESAFE_API=''\r\n", false, 'two single quotes, Windows line endings'],
+    ["TYPESAFE_API=abc\r\n", true, 'a key, Windows line endings'],
+    ["TYPESAFE_API=# nothing\n", false, 'a value that is only a comment is no key'],
+    ["TYPESAFE_API=\"\" # comment\n", false, 'two quotes followed by a comment is no key'],
+    ["TYPESAFE_API=abc123 # my key\n", true, 'a key followed by a comment'],
+    ["TYPESAFE_API=\"\"\nTYPESAFE_API_KEY=real\n", true, 'an empty TYPESAFE_API on line 1 does not hide a real TYPESAFE_API_KEY on a later line'],
+    ["TYPESAFE_API_KEY=\nTYPESAFE_API=real\n", true, 'and the other way round'],
 ];
 foreach ($cases as [$content, $want, $label]) {
     file_put_contents($env, $content);
@@ -506,6 +801,11 @@ putenv("NB_ENV_FILE=$env");
 check(nb_has_typesafe_key() === true, 'and even when the .env file has an empty key');
 putenv('TYPESAFE_API_KEY=');
 check(nb_has_typesafe_key() === false, 'an empty TYPESAFE_API_KEY in the environment is no key');
+putenv('TYPESAFE_API_KEY=   ');
+check(nb_has_typesafe_key() === false, 'a whitespace-only TYPESAFE_API_KEY in the environment is no key');
+putenv('TYPESAFE_API_KEY=0');
+file_put_contents($env, '');
+check(nb_has_typesafe_key() === true, 'a TYPESAFE_API_KEY of "0" in the environment is a key (not an empty one)');
 putenv($savedKey === false ? 'TYPESAFE_API_KEY' : "TYPESAFE_API_KEY=$savedKey");
 putenv('NB_ENV_FILE');
 $out = (string)shell_exec('cd ' . escapeshellarg(nb_root()) . ' && php -r ' . escapeshellarg('require "lib/mining.php"; echo nb_now();') . ' 2>&1');
