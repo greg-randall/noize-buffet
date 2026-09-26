@@ -588,7 +588,7 @@ function nb_mining_recover_interrupted(PDO $pdo): int
 function nb_leads_replace(PDO $pdo, array $leads): void
 {
     foreach ($leads as $l) {
-        if (!in_array($l['strength'], NB_LEAD_STRENGTHS, true)) {
+        if (!in_array($l['strength'] ?? null, NB_LEAD_STRENGTHS, true)) {
             throw new InvalidArgumentException('lead strength must be one of ' . implode(', ', NB_LEAD_STRENGTHS));
         }
     }
@@ -627,13 +627,16 @@ function nb_leads(PDO $pdo): array
 /**
  * Grouping key for an artist name. Steps (must match norm() in mining/mentions.py exactly;
  * tests/test_mining.py checks they agree):
- *   (a) trim Unicode whitespace at both ends (NBSP included);
- *   (b) lowercase;
- *   (c) NFKD-normalise and strip combining marks (\p{Mn});
- *   (d) lowercase again (NFKD can surface new uppercase letters, e.g. compatibility decompositions);
- *   (e) replace a final sigma "ς" with a regular sigma "σ";
- *   (f) drop a leading "the" followed by whitespace;
- *   (g) keep only letters and digits.
+ *   (a) scrub invalid UTF-8 bytes first (mb_scrub), so a malformed byte can't make preg_replace()
+ *       return null further down (which would otherwise collapse the whole key to an empty string);
+ *   (b) trim whitespace at both ends: Unicode separators (\p{Z}) plus tab/LF/VT/FF/CR
+ *       (\t\n\x0B\f\r) — an explicit set, not \s, and NBSP is a \p{Z} character so it's included;
+ *   (c) lowercase;
+ *   (d) NFKD-normalise and strip combining marks (\p{Mn});
+ *   (e) lowercase again (NFKD can surface new uppercase letters, e.g. compatibility decompositions);
+ *   (f) replace a final sigma "ς" with a regular sigma "σ";
+ *   (g) drop a leading "the" followed by one or more of the same trim-set whitespace characters;
+ *   (h) keep only letters and digits.
  * Requires the intl extension (for Normalizer); throws rather than silently degrading if it's missing.
  */
 function nb_name_key(string $name): string
@@ -641,12 +644,13 @@ function nb_name_key(string $name): string
     if (!class_exists('Normalizer')) {
         throw new RuntimeException('nb_name_key needs the PHP intl extension');
     }
-    $name = (string)preg_replace('/^[\p{Z}\s]+|[\p{Z}\s]+$/u', '', $name);
+    $name = mb_scrub($name, 'UTF-8');
+    $name = (string)preg_replace('/^[\p{Z}\t\n\x0B\f\r]+|[\p{Z}\t\n\x0B\f\r]+$/u', '', $name);
     $name = mb_strtolower($name);
     $name = (string)preg_replace('/\p{Mn}+/u', '', (string)Normalizer::normalize($name, Normalizer::FORM_KD));
     $name = mb_strtolower($name);
     $name = str_replace('ς', 'σ', $name);
-    $name = (string)preg_replace('/^the[\p{Z}\s]+/u', '', $name);
+    $name = (string)preg_replace('/^the[\p{Z}\t\n\x0B\f\r]+/u', '', $name);
     return (string)preg_replace('/[^\p{L}\p{N}]+/u', '', $name);
 }
 
