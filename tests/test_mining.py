@@ -301,6 +301,48 @@ check(keyword_filter.flag("if you like this check out Burial"), "cue phrase flag
 check(keyword_filter.flag("Daft Punk - Get Lucky is the blueprint"), "Artist - Song flagged")
 check(keyword_filter.flag('that "Archangel" feeling'), "quoted title flagged")
 check(not keyword_filter.flag("love this so much 😭"), "plain praise not flagged")
+
+print("keyword filter: dash cue doesn't fire on timestamps or year ranges (review item 7)")
+check(not keyword_filter.flag("3:45 - the drop"), "a timestamp dash is not flagged")
+check(not keyword_filter.flag("2010 - 2020"), "a year range dash is not flagged")
+check(keyword_filter.flag("Daft Punk - Get Lucky"), "a spaced 'Artist - Song' dash is still flagged")
+check(keyword_filter.flag("Radiohead–Creep"), "an unspaced en dash between names is still flagged")
+
+print("keyword filter: feat/ft/prod don't fire inside ordinary words (review item 8)")
+check(not keyword_filter.flag("what a great feature film"), "'feature' is not mistaken for 'feat'")
+check(not keyword_filter.flag("featuring xyz"), "'featuring' is not mistaken for 'feat'")
+check(keyword_filter.flag("check this ft. Drake"), "'ft.' followed by a space still cues")
+check(keyword_filter.flag("prod. Metro Boomin on this one"), "'prod.' followed by a space still cues")
+
+print("keyword filter: new cheap cues (review item 9)")
+check(keyword_filter.flag("Danny Harf Defy Trailer brought me here"), "'brought me here' cues")
+check(keyword_filter.flag("Taylor Swift stole the melody"), "'stole' cues")
+check(keyword_filter.flag("total Burial-esque atmosphere"), "'-esque' cues")
+check(not keyword_filter.flag("Pls drop another album"), "bare 'album' no longer cues on its own")
+check(keyword_filter.flag("new album by Burial dropped today"), "'album by' still cues")
+
+print("keyword filter: clear errors (review item 11)")
+missing_input = TMP / "does_not_exist.info.json"
+cli = subprocess.run(["python3", str(ROOT / "mining" / "keyword_filter.py"), "--input", str(missing_input)],
+                     capture_output=True, text=True)
+check(cli.returncode != 0 and "no such file" in cli.stderr, "keyword_filter: missing file gives a clear error")
+bad_json = TMP / "bad.info.json"
+bad_json.write_text("{not json", encoding="utf-8")
+cli = subprocess.run(["python3", str(ROOT / "mining" / "keyword_filter.py"), "--input", str(bad_json)],
+                     capture_output=True, text=True)
+check(cli.returncode != 0 and "not valid JSON" in cli.stderr, "keyword_filter: bad JSON gives a clear error")
+no_comments = TMP / "no_comments.info.json"
+no_comments.write_text(json.dumps({"id": "X"}), encoding="utf-8")
+cli = subprocess.run(["python3", str(ROOT / "mining" / "keyword_filter.py"), "--input", str(no_comments)],
+                     capture_output=True, text=True)
+check(cli.returncode != 0 and "no 'comments' key" in cli.stderr,
+      "keyword_filter: missing 'comments' key gives a clear error")
+no_id = TMP / "no_id.info.json"
+no_id.write_text(json.dumps({"comments": []}), encoding="utf-8")
+cli = subprocess.run(["python3", str(ROOT / "mining" / "keyword_filter.py"), "--input", str(no_id)],
+                     capture_output=True, text=True)
+check(cli.returncode != 0 and "no 'id' key" in cli.stderr, "keyword_filter: missing 'id' key gives a clear error")
+
 vd = TMP / "VIDEO000002"
 shutil.rmtree(vd, ignore_errors=True)
 vd.mkdir(parents=True)
@@ -324,6 +366,74 @@ except ImportError as e:
 else:
     rows = find_music_mentions.load_comments(vd / "VIDEO000002.info.json")
     check(rows[0]["author_id"] == "UCann" and rows[0]["like_count"] == 50, "TypeSafe filter keeps author id and likes")
+
+    print("find_music_mentions: write_csv includes new fields, no DictWriter crash (review item 1)")
+    fm_dir = TMP / "VIDEO_FM"
+    shutil.rmtree(fm_dir, ignore_errors=True)
+    fm_dir.mkdir(parents=True)
+    fake_row = {"video_id": "VIDEO_FM", "video_title": "T", "comment_id": "z1", "parent": "root",
+                "author": "@z", "author_id": "UCz", "like_count": 7, "text": "hi",
+                "p_song": 0.1, "p_artist": 0.9, "input_tokens": 10, "output_tokens": 2, "model": "jev-latest"}
+    (fm_dir / "music_mentions.jsonl").write_text(json.dumps(fake_row) + "\n", encoding="utf-8")
+    csv_rows = find_music_mentions.write_csv(fm_dir / "music_mentions.jsonl", fm_dir / "music_mentions.csv")
+    header = (fm_dir / "music_mentions.csv").read_text(encoding="utf-8").splitlines()[0]
+    check("author_id" in header and "like_count" in header,
+          "write_csv's CSV header includes author_id and like_count (no DictWriter crash)")
+    flagged = find_music_mentions.write_flagged(csv_rows, fm_dir / "music_mentions_flagged.json", 0.8, 0.8,
+                                                len(csv_rows), 0)
+    check(flagged[0]["author_id"] == "UCz" and flagged[0]["like_count"] == 7,
+          "write_flagged keeps author_id and like_count in the flagged row")
+    flagged_json = json.loads((fm_dir / "music_mentions_flagged.json").read_text(encoding="utf-8"))
+    check(flagged_json["comments_total"] == 1 and flagged_json["failed"] == 0,
+          "write_flagged writes comments_total and failed into the JSON (review item 2)")
+
+    print("find_music_mentions: refresh_rows drops stale rows and counts them (review item 3)")
+    stale_dir = TMP / "VIDEO_STALE"
+    shutil.rmtree(stale_dir, ignore_errors=True)
+    stale_dir.mkdir(parents=True)
+    info_stale = {"id": "VIDEO_STALE", "title": "New Title", "comments": [
+        {"id": "keep1", "author": "@k", "author_id": "UCk", "like_count": 3, "text": "sounds like Burial"}]}
+    (stale_dir / "VIDEO_STALE.info.json").write_text(json.dumps(info_stale), encoding="utf-8")
+    comments_stale = find_music_mentions.load_comments(stale_dir / "VIDEO_STALE.info.json")
+    stale_rows = [
+        {**comments_stale[0], "video_title": "Old Title", "p_song": 0.1, "p_artist": 0.9,
+         "input_tokens": 1, "output_tokens": 1, "model": "m"},
+        {"video_id": "VIDEO_STALE", "video_title": "S", "comment_id": "gone1", "parent": "root", "author": "@g",
+         "author_id": "UCg", "like_count": 0, "text": "old text", "p_song": 0.9, "p_artist": 0.9,
+         "input_tokens": 1, "output_tokens": 1, "model": "m"},
+    ]
+    refreshed, missing = find_music_mentions.refresh_rows(stale_rows, comments_stale)
+    check(missing == 1 and len(refreshed) == 1 and refreshed[0]["comment_id"] == "keep1",
+          "refresh_rows drops a row whose comment vanished from info.json, and counts it")
+    check(refreshed[0]["video_title"] == "New Title",
+          "refresh_rows overlays the row with the comment's current fields")
+
+    print("find_music_mentions: clear errors (review item 11)")
+
+    def expect_exit(fn, *fn_args):
+        try:
+            fn(*fn_args)
+            return None
+        except SystemExit as e:
+            return str(e)
+
+    check("no such file" in (expect_exit(find_music_mentions.load_comments, missing_input) or ""),
+          "find_music_mentions: missing file gives a clear error")
+    check("not valid JSON" in (expect_exit(find_music_mentions.load_comments, bad_json) or ""),
+          "find_music_mentions: bad JSON gives a clear error")
+    check("no 'comments' key" in (expect_exit(find_music_mentions.load_comments, no_comments) or ""),
+          "find_music_mentions: missing 'comments' key gives a clear error")
+    check("no 'id' key" in (expect_exit(find_music_mentions.load_comments, no_id) or ""),
+          "find_music_mentions: missing 'id' key gives a clear error")
+
+    missing_env = TMP / "does_not_exist.env"
+    msg = expect_exit(find_music_mentions.load_api_key, missing_env) or ""
+    check("does not exist" in msg, "load_api_key notes a missing .env file")
+    present_env = TMP / "present_no_key.env"
+    present_env.write_text("SOME_OTHER_VAR=1\n", encoding="utf-8")
+    msg = expect_exit(find_music_mentions.load_api_key, present_env) or ""
+    check("exists" in msg and "does not exist" not in msg,
+          "load_api_key notes the .env file exists (but has no key)")
 
 print("ALL PASSED" if fails == 0 else f"FAILED {fails}")
 sys.exit(1 if fails else 0)

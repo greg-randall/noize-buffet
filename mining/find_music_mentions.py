@@ -2,8 +2,7 @@
 """Ask TypeSafe two yes/no questions about every YouTube comment:
 does it name a song, and does it name a musical artist?
 
-Reads one yt-dlp .info.json (--input, default: the *.info.json next to this
-script). Each comment's text alone is one TypeSafe call carrying both
+Reads one yt-dlp .info.json (--input). Each comment's text alone is one TypeSafe call carrying both
 questions. Outputs go in the input file's folder: results are appended to
 music_mentions.jsonl as they arrive, so an interrupted run resumes where it
 stopped. At the end every row is written to music_mentions.csv, and comments
@@ -34,6 +33,7 @@ HERE = Path(__file__).resolve().parent
 RESULTS_JSONL = "music_mentions.jsonl"
 RESULTS_CSV = "music_mentions.csv"
 RESULTS_FLAGGED = "music_mentions_flagged.json"
+RESULTS_FLAGGED_DEBUG = "music_mentions_flagged.debug.json"  # --debug writes here, never over the real file
 
 # jev-1.13: $0.042 per million input tokens, output tokens free (https://docs.typesafe.ai/models, 2026-09)
 USD_PER_INPUT_TOKEN = 0.042 / 1e6
@@ -76,12 +76,22 @@ def load_api_key(env_file: Path) -> str:
     # the .env uses TYPESAFE_API; the SDK's own name is TYPESAFE_API_KEY
     key = os.environ.get("TYPESAFE_API_KEY") or os.environ.get("TYPESAFE_API")
     if not key:
-        sys.exit(f"No TYPESAFE_API_KEY or TYPESAFE_API found in environment or {env_file}")
+        exists = "exists" if env_file.is_file() else "does not exist"
+        sys.exit(f"No TYPESAFE_API_KEY or TYPESAFE_API found in environment or {env_file} ({exists})")
     return key
 
 
 def load_comments(path: Path) -> list[dict]:
-    info = json.loads(path.read_text(encoding="utf-8"))
+    if not path.is_file():
+        sys.exit(f"no such file: {path}")
+    try:
+        info = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        sys.exit(f"not valid JSON: {path}")
+    if "comments" not in info:
+        sys.exit(f"no 'comments' key in {path}: was it downloaded with --write-comments?")
+    if "id" not in info:
+        sys.exit(f"no 'id' key in {path}: is this a yt-dlp .info.json?")
     return [{
         "video_id": info["id"],
         "video_title": info.get("title", ""),
@@ -146,8 +156,10 @@ async def run(todo, jsonl, api_key, model, concurrency, rpm, verbose):
         stats["input_tokens"] += row["input_tokens"]
         bar.update(1)
 
+    # a piped/redirected stderr isn't a TTY: update the bar every 5s instead of on every tick, or logs flood
+    bar_kwargs = {} if sys.stderr.isatty() else {"mininterval": 5}
     with jsonl.open("a", encoding="utf-8") as out, \
-            tqdm(total=len(todo), desc="asking TypeSafe", unit="comment") as bar:
+            tqdm(total=len(todo), desc="asking TypeSafe", unit="comment", **bar_kwargs) as bar:
         async with AsyncTypeSafeClient(api_key=api_key, retry=RETRY) as client:
             await asyncio.gather(*(one(client, c, out, bar) for c in todo))
     return stats
@@ -172,7 +184,7 @@ def write_csv(jsonl: Path, csv_path: Path) -> list[dict]:
     if jsonl.exists():  # absent when the video has no comments
         with jsonl.open(encoding="utf-8") as f:
             rows = [json.loads(line) for line in f]
-    fields = ["video_id", "video_title", "comment_id", "parent", "author",
+    fields = ["video_id", "video_title", "comment_id", "parent", "author", "author_id", "like_count",
               "p_song", "p_artist", "text", "input_tokens", "output_tokens", "model"]
     with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fields)
@@ -181,7 +193,24 @@ def write_csv(jsonl: Path, csv_path: Path) -> list[dict]:
     return rows
 
 
-def write_flagged(rows, flagged_path, song_t, artist_t) -> list[dict]:
+def refresh_rows(rows: list[dict], comments: list[dict]) -> tuple[list[dict], int]:
+    """Overlay each row's video/comment fields (title, author, likes, text) with the current info.json,
+    since a row may have been written in an earlier run against an older copy of the file. A row whose
+    comment id is no longer present (the comment was deleted, or a different --input was passed) is left
+    out of the return value; its count is returned too so the caller can report it instead of silently
+    dropping it."""
+    by_id = {(c["video_id"], c["comment_id"]): c for c in comments}
+    refreshed, missing = [], 0
+    for row in rows:
+        key = (row["video_id"], row["comment_id"])
+        if key in by_id:
+            refreshed.append({**row, **by_id[key]})
+        else:
+            missing += 1
+    return refreshed, missing
+
+
+def write_flagged(rows, flagged_path, song_t, artist_t, comments_total, failed) -> list[dict]:
     flagged = []
     for row in rows:
         song, artist = row["p_song"] >= song_t, row["p_artist"] >= artist_t
@@ -191,6 +220,8 @@ def write_flagged(rows, flagged_path, song_t, artist_t) -> list[dict]:
         "song_threshold": song_t,
         "artist_threshold": artist_t,
         "comments_checked": len(rows),
+        "comments_total": comments_total,
+        "failed": failed,
         "flagged": flagged,
     }, indent=2, ensure_ascii=False), encoding="utf-8")
     return flagged
@@ -210,20 +241,22 @@ def main():
     parser.add_argument("--artist-threshold", type=float, default=0.8,
                         help="flag a comment as naming an artist at p >= this (default: 0.8)")
     parser.add_argument("--debug", type=int, metavar="N",
-                        help="ask only the first N comments, one at a time; nothing written to the JSONL/CSV")
+                        help="ask only the first N comments, one at a time; nothing written to the JSONL/CSV, "
+                             f"and flagged rows go to {RESULTS_FLAGGED_DEBUG} instead of {RESULTS_FLAGGED}")
     parser.add_argument("--verbose", action="store_true", help="print the full TypeSafe input and output per comment")
     args = parser.parse_args()
 
     input_path = args.input
-    if not input_path.is_file():
-        sys.exit(f"--input not found: {input_path}")
     out_dir = input_path.resolve().parent
-    jsonl, csv_path, flagged_path = out_dir / RESULTS_JSONL, out_dir / RESULTS_CSV, out_dir / RESULTS_FLAGGED
+    jsonl, csv_path = out_dir / RESULTS_JSONL, out_dir / RESULTS_CSV
+    # --debug never touches the real flagged file: it only asks a handful of comments, one at a time
+    flagged_path = out_dir / (RESULTS_FLAGGED_DEBUG if args.debug else RESULTS_FLAGGED)
 
     api_key = load_api_key(args.env)
     comments = load_comments(input_path)
     print(f"input: {input_path}", file=sys.stderr)
 
+    failed = 0
     if args.debug:
         rows = asyncio.run(debug(comments[:args.debug], api_key, args.model, args.verbose,
                                  args.song_threshold, args.artist_threshold))
@@ -235,6 +268,7 @@ def main():
         if todo:
             print(f"rate limit {args.rpm:,.0f}/min -> at least {len(todo) / args.rpm:,.1f} minutes", file=sys.stderr)
             stats = asyncio.run(run(todo, jsonl, api_key, args.model, args.concurrency, args.rpm, args.verbose))
+            failed = stats["failed"]
             print(f"this run: {stats['input_tokens']:,} input tokens, "
                   f"${stats['input_tokens'] * USD_PER_INPUT_TOKEN:.6f}; failed: {stats['failed']:,}"
                   + (" (re-run to retry them)" if stats["failed"] else ""), file=sys.stderr)
@@ -246,12 +280,21 @@ def main():
     print(f"{label}: {tokens:,} input tokens, ${tokens * USD_PER_INPUT_TOKEN:.6f} "
           f"(${tokens * USD_PER_INPUT_TOKEN / max(len(rows), 1) * 1000:.4f} per 1,000 comments)", file=sys.stderr)
 
-    flagged = write_flagged(rows, flagged_path, args.song_threshold, args.artist_threshold)
+    refreshed, missing = refresh_rows(rows, comments)
+    if missing:
+        print(f"{missing:,} rows in {jsonl} refer to comments no longer in {input_path}; "
+              f"excluded from {flagged_path}", file=sys.stderr)
+
+    flagged = write_flagged(refreshed, flagged_path, args.song_threshold, args.artist_threshold,
+                            len(comments), failed)
     songs = sum(f["song"] for f in flagged)
     artists = sum(f["artist"] for f in flagged)
-    print(f"{len(flagged):,} of {len(rows):,} flagged -> {flagged_path} "
+    print(f"{len(flagged):,} of {len(refreshed):,} flagged -> {flagged_path} "
           f"(song >= {args.song_threshold}: {songs:,}, artist >= {args.artist_threshold}: {artists:,})",
           file=sys.stderr)
+
+    if failed:
+        sys.exit(f"{failed:,} comments failed at TypeSafe; re-run to retry them, finished results are kept")
 
 
 if __name__ == "__main__":
