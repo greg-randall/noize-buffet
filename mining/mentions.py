@@ -152,6 +152,15 @@ def _quoted_songs(text: str):
     return [m for m in _STRAIGHT_SINGLE_RE.finditer(text) if _valid_straight_single(text, m)]
 
 
+def _notes_outside(text: str, spans):
+    """NOTE_RE matches in `text` that don't lie inside any of `spans` (quoted-song match objects), so a
+    bracket/paren that's actually part of a song title -- "Runaway (feat. Pusha T)", "(I Can't Get No)
+    Satisfaction", "Song (Why?)" -- is left alone instead of being treated as a tag or an annotation to
+    strip out."""
+    return [m for m in NOTE_RE.finditer(text)
+            if not any(s.start() <= m.start() and m.end() <= s.end() for s in spans)]
+
+
 def _clean_quote_leftovers(s: str) -> str:
     """After a quoted song is cut out of the text, tidy up what's left: an empty "()"/"[]" (the quote
     was the note's whole content, e.g. Daft Punk ("Get Lucky")) and a lone "/" (it separated two quoted
@@ -176,13 +185,16 @@ def parse_mention(raw: str, notes: list = None):
 
     A song may be one or more quoted titles (joined with " / " if there's more than one; an empty quote,
     e.g. Kanye West — "", doesn't count as a song) or, failing that, text split on a spaced dash
-    ("Artist - Song"); an unspaced dash ("Jay-Z") is left alone. When a quoted song follows a spaced
-    dash, the artist is just the text before that dash (so a trailing "(Radio Edit)" or "(2013)" next to
-    the quote doesn't matter); otherwise the artist is what's left after cutting the quotes out and
-    tidying leftovers (see _clean_quote_leftovers). A leading "by " is stripped from the artist only when
-    a quoted song was found before it ("'Get Lucky' by Daft Punk"), so a real name like "By Divine
-    Right" is untouched."""
-    all_notes = [(m, _note_text(m)) for m in NOTE_RE.finditer(raw)]
+    ("Artist - Song"); an unspaced dash ("Jay-Z") is left alone. A bracket or paren that's actually
+    inside a quoted title -- "Runaway (feat. Pusha T)", "(I Can't Get No) Satisfaction" -- is left
+    intact: it's never treated as a tag or a note to strip, no matter what it looks like. When a quoted
+    song follows a spaced dash, the artist is just the text before that dash (so a trailing "(Radio
+    Edit)" or "(2013)" next to the quote doesn't matter); otherwise the artist is what's left after
+    cutting the quotes out and tidying leftovers (see _clean_quote_leftovers). A leading "by " is
+    stripped from the artist only when a quoted song was found before it ("'Get Lucky' by Daft Punk"),
+    so a real name like "By Divine Right" is untouched."""
+    quote_spans = _quoted_songs(raw)
+    all_notes = [(m, _note_text(m)) for m in _notes_outside(raw, quote_spans)]
     own = [m for m, c in all_notes if _is_own_artist_note(c)]
     unsure = [m for m, c in all_notes if _is_unsure_note(c)]
     if own:
@@ -199,12 +211,17 @@ def parse_mention(raw: str, notes: list = None):
     if NONE_RE.fullmatch(text):
         return None, None, "none"
 
-    # Any note left at this point is an annotation, not part of the name; drop it, but record it.
-    leftover = list(NOTE_RE.finditer(text))
+    # Any note left at this point (outside a quoted title, still) is an annotation, not part of the
+    # name; drop it, but record it. Positions shifted when the tag note(s) were removed above, so quote
+    # spans are recomputed against the current `text`.
+    quote_spans = _quoted_songs(text)
+    leftover = _notes_outside(text, quote_spans)
     if notes is not None:
         notes.extend(m.group(0) for m in leftover)
     text = _remove_matches(text, leftover).strip()
 
+    # Positions shifted again when the leftover notes were removed; recompute once more for the actual
+    # song extraction below.
     matches = _quoted_songs(text)
     song_matches = [m for m in matches if _song_text(m).strip()]
     if not song_matches and matches:

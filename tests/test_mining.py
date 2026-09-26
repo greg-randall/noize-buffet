@@ -130,6 +130,17 @@ check(mentions.parse_mention('Daft Punk — "A" / "B"') == ("Daft Punk", "A / B"
 check(mentions.parse_mention('Daft Punk ("Get Lucky")') == ("Daft Punk", "Get Lucky", ""),
       "the empty parentheses left behind when a quote was their whole content are cleaned up")
 
+print("brackets and parens inside a quoted song title are kept, not stripped as notes")
+check(mentions.parse_mention('Kanye West — "Runaway (feat. Pusha T)"')
+      == ("Kanye West", "Runaway (feat. Pusha T)", ""), "a parenthesised feature credit inside the quotes survives")
+check(mentions.parse_mention('The Rolling Stones — "(I Can\'t Get No) Satisfaction"')
+      == ("The Rolling Stones", "(I Can't Get No) Satisfaction", ""),
+      "a leading parenthesised part of the title survives, apostrophe and all")
+check(mentions.parse_mention('Artist — "Song (Why?)"') == ("Artist", "Song (Why?)", ""),
+      "a '?' inside the quoted title doesn't make it look like a hedge note")
+check(mentions.parse_mention('Artist — "Love Song (Maybe Not)" [unsure]') == ("Artist", "Love Song (Maybe Not)",
+      "unsure"), "a real [unsure] tag outside the quotes still works, and the title's own paren survives")
+
 print("bracket and parenthesis notes are dropped, not left in the name")
 check(mentions.parse_mention("Babylon AD [own artist's album reference]") == ("Babylon AD", "", "own artist"),
       "a bracket note starting with 'own artist' is the own-artist tag, and the whole note is removed")
