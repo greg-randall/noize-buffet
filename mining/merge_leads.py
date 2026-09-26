@@ -98,7 +98,7 @@ def _read_video(folder: Path, vid: str, skipped: dict, problems: list, notes: li
     files = sorted(folder.glob("artists.chunk-*.md"))
     idx_path = folder / "comment_index.json"
     if not idx_path.exists():
-        problems.append(f"{vid}: has artists files but no comment_index.json")
+        problems.append(f"{vid}/comment_index.json: missing (the folder has artists files)")
         return None
     try:
         index = json.loads(idx_path.read_text(encoding="utf-8"))
@@ -109,7 +109,8 @@ def _read_video(folder: Path, vid: str, skipped: dict, problems: list, notes: li
         problems.append(f"{vid}/comment_index.json: could not read: not a JSON object")
         return None
     if not files:
-        notes.append(f"{vid}: no extraction output yet")
+        if index:  # an empty index is a video with no flagged comments: nothing to extract, nothing to report
+            notes.append(f"{vid}: no extraction output yet")
         return None
     groups = {}  # cid -> the lines for that comment, in file order
     for path in files:

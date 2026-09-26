@@ -538,7 +538,7 @@ check(any("CORRUPTINDEX/comment_index.json: could not read" in p for p in r["pro
       "corrupt comment_index.json is reported under problems")
 check(any("BADENCODING/artists.chunk-01.md: could not read" in p for p in r["problems"]),
       "non-UTF-8 artists file is reported under problems")
-check(any("NOINDEXXXXX" in p and "no comment_index.json" in p for p in r["problems"]),
+check(any(p.startswith("NOINDEXXXXX/comment_index.json: missing") for p in r["problems"]),
       "artists files without an index are reported under problems")
 check("NOOUTPUTXXX: no extraction output yet" in r["notes"], "an index without artists files is noted")
 check("NOAUTHORIDXX/c1: no author_id; counted by @zed" in r["notes"]
