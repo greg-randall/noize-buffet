@@ -145,41 +145,56 @@ function nb_run_logged(array $cmd, string $cwd, string $logFile, ?float $timeout
     }
     fclose($pipes[1]);
 
-    // Get status to check if process was killed by a signal (only if we might need to timeout-detect)
-    $wasSignaled = false;
-    $signalNum = 0;
-    if ($timeoutS !== null) {
+    // Poll proc_get_status() until process exits or deadline passes, to capture the exit code
+    // from the FIRST status that shows running === false (before proc_close reaps it).
+    $exit = null;
+    $status = null;
+    while (true) {
         $status = proc_get_status($proc);
-        $wasSignaled = $status['signaled'] ?? false;
-        $signalNum = $status['termsig'] ?? 0;
-    }
-
-    // If we're past the deadline, forcefully kill the process
-    if ($deadlineNs !== null && hrtime(true) >= $deadlineNs) {
-        $status = proc_get_status($proc);
-        if ($status['running']) {
+        if (!$status['running']) {
+            // Process has finished; extract exit code from status
+            if ($status['signaled']) {
+                $exit = 128 + $status['termsig'];
+            } else {
+                $exit = $status['exitcode'];
+            }
+            break;
+        }
+        if ($deadlineNs !== null && hrtime(true) >= $deadlineNs) {
+            // Past the deadline; forcefully kill the process
             @proc_terminate($proc, 9); // SIGKILL
-            for ($i = 0; $i < 10; $i++) {
-                usleep(100000); // 0.1 seconds
+            // Wait a bit for it to die, bounded by remaining time until absolute deadline + grace
+            $waitUntil = min($deadlineNs + (int)(2 * 1e9), hrtime(true) + (int)(10 * 1e9));
+            while (hrtime(true) < $waitUntil) {
                 $status = proc_get_status($proc);
                 if (!$status['running']) {
-                    break;
+                    if ($status['signaled']) {
+                        $exit = 128 + $status['termsig'];
+                    } else {
+                        $exit = $status['exitcode'];
+                    }
+                    break 2; // Exit both loops
+                }
+                usleep(100000); // 0.1 seconds
+            }
+            // If still running after grace, extract what we have
+            if ($exit === null) {
+                if ($status['signaled']) {
+                    $exit = 128 + $status['termsig'];
+                } else {
+                    $exit = $status['exitcode'];
                 }
             }
+            break;
         }
-        // Update signal info after potential force-kill
-        $wasSignaled = $status['signaled'] ?? false;
-        $signalNum = $status['termsig'] ?? 0;
+        usleep(10000); // 0.01 seconds
     }
 
-    $exit = proc_close($proc);
+    // Call proc_close() only to release the handle; do NOT use its return value for exit code
+    proc_close($proc);
+
     $duration = (hrtime(true) - $tStart) / 1e9;
     $duration = round($duration, 1);
-
-    // If we have a timeout and process was signaled with -1 exit, convert to signal-based exit code
-    if ($timeoutS !== null && $exit === -1 && $wasSignaled && $signalNum > 0 && $duration >= $timeoutS - 0.5) {
-        $exit = 128 + $signalNum;
-    }
 
     // Map timeout exit codes to timed_out ONLY if elapsed >= timeoutS - 0.5
     $timeOutExitCodes = [124, 137, 143, 9];
