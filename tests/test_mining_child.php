@@ -43,7 +43,7 @@ file_put_contents($fake, "#!/usr/bin/env bash\nexec " . escapeshellarg(PHP_BINAR
 chmod($fake, 0755);
 putenv("NB_CLAUDE_BIN=$fake");
 putenv("NB_FAKE_ARGS=$argsFile");
-$config = ['mining_child_model' => 'haiku', 'mining_child_timeout_s' => 20] + nb_config();
+$config = ['mining_child_model' => 'haiku', 'mining_child_timeout_s' => 20, 'mining_child_max_budget_usd' => 0.75] + nb_config();
 $lastCall = function () use ($argsFile, $jsonl): array {
     $calls = $jsonl($argsFile);
     return end($calls);
@@ -60,6 +60,9 @@ foreach ($expected as $key => $value) {
     check(($fromFile[$key] ?? null) === $value, "config.json has $key = " . json_encode($value));
     check(nb_config()[$key] === $value, "nb_config() gives $key = " . json_encode($value));
 }
+check(($noFile['mining_child_max_budget_usd'] ?? null) === 1.0, 'default mining_child_max_budget_usd = 1.0');
+check(is_numeric($fromFile['mining_child_max_budget_usd'] ?? null) && (float)$fromFile['mining_child_max_budget_usd'] === 1.0, 'config.json has mining_child_max_budget_usd = 1.0');
+check((float)(nb_config()['mining_child_max_budget_usd'] ?? 0) === 1.0, 'nb_config() gives mining_child_max_budget_usd = 1.0');
 check($noFile === NB_CONFIG_DEFAULTS && isset($noFile['batch_size'], $noFile['refill_when_left']), 'the old settings are still in the defaults');
 check(($fromFile['batch_size'] ?? null) === 12 && ($fromFile['refill_when_left'] ?? null) === 5 && isset($fromFile['mix']['close']),
     'the old settings are still in config.json');
@@ -90,6 +93,17 @@ check(str_contains($text, 'own artist') && str_contains($text, 'unsure'), 'it ex
 check((bool)preg_match('/^\s*- \[c\d+\] none\s*$/m', $text), 'it shows the "none" line');
 check(str_contains($text, 'artists.chunk-'), 'it names the output file pattern');
 check(str_contains($text, 'Read') && str_contains($text, 'Write'), 'it says to read the chunk and write the output');
+check(preg_match('/untrusted/i', $text) && preg_match('/strangers/i', $text) && preg_match('/\b(never|do not|don\'t)\b[^.\n]*\b(follow|obey)/i', $text)
+    && stripos($text, 'instruction') !== false, 'it warns that comment text is untrusted, from strangers, and never to be followed as instructions');
+check(str_contains($text, 'Only write the one output file your task names. Never edit CLAUDE.md or any other file.'), 'it says to write only the one output file and never edit CLAUDE.md');
+check(preg_match('/^2\. (.*?)^3\. /ms', $text, $step2) && stripos($step2[1], 'song') !== false && stripos($step2[1], 'in quotes') !== false,
+    'the step that lists what to write also gives the song-only rule (song in quotes)');
+check(preg_match('/^## Output format\s(.*?)^## /ms', $text, $fmt) && preg_match('/^\s*- \[c\d+\] "[^"]+"\s*$/m', $fmt[1]),
+    'the output format shows a song-only line, - [cN] "Song"');
+check((bool)preg_match('/^(?=.*album)(?=.*\x{2014} ").*$/mui', $text), 'it gives a line format for albums, Artist - "Album" with an em dash');
+check(stripos($text, 'one id per line') !== false && str_contains($text, '[c12, c13]'), 'it says one id per line, never [c12, c13]');
+check((bool)preg_match('/ignore[^.\n]*@author/i', $text), 'it says to ignore the @author handle');
+check(stripos($text, 'straight double quotes') !== false, 'it says to use straight double quotes');
 
 echo "running a command with a log\n";
 $logDir = $video('logged');
@@ -120,21 +134,105 @@ check(str_contains((string)file_get_contents($log), 'timed out'), 'the log says 
 $t = microtime(true);
 $r = nb_run_logged(['bash', '-c', 'echo quick'], $logDir, $log, 30.0);
 check($r['timed_out'] === false && $r['exit'] === 0 && microtime(true) - $t < 4, 'a time limit does not delay a command that finishes early');
+$r = nb_run_logged(['bash', '-c', 'exit 4'], $logDir, $log, 5.0, 1.0);
+check($r['exit'] === 4 && $r['timed_out'] === false, 'a command that fails before its limit keeps its exit code');
+$t = microtime(true);
+$r = nb_run_logged(['bash', '-c', 'exec sleep 30'], $logDir, $log, 1.0, 30.0);
+check($r['timed_out'] === true && $r['exit'] === null && microtime(true) - $t < 5, 'a command that dies at SIGTERM is not made to wait out the kill grace period');
+
+echo "no GNU timeout\n";
+$pathOnly = $video('path_with_only_php');
+symlink(PHP_BINARY, "$pathOnly/php");
+$oldPath = getenv('PATH');
+putenv("PATH=$pathOnly");
+try {
+    $r = nb_run_logged(['php', '-r', 'echo "still works";'], $logDir, $log);
+    $noLimit = $r['out'] === 'still works' && $r['exit'] === 0;
+    $err = null;
+    try {
+        nb_run_logged(['php', '-r', 'echo "x";'], $logDir, $log, 5.0);
+    } catch (RuntimeException $e) {
+        $err = $e->getMessage();
+    }
+} finally {
+    putenv("PATH=$oldPath");
+}
+check($noLimit, 'without a time limit nb_run_logged does not need `timeout`');
+check($err !== null && str_contains($err, 'timeout') && str_contains($err, 'GNU coreutils'),
+    'with a time limit and no `timeout` on the PATH it throws a RuntimeException that names timeout and GNU coreutils');
+
+echo "time limits that a misbehaving command tries to dodge\n";
+/** Is this process running? (A zombie is dead: it just has not been reaped yet.) */
+$alive = function (int $pid): bool {
+    if ($pid <= 0 || !posix_kill($pid, 0)) {
+        return false;
+    }
+    $stat = @file_get_contents("/proc/$pid/stat");
+    return !($stat !== false && preg_match('/^\d+ \(.*\) Z /s', $stat));
+};
+$dead = function (int $pid, float $waitS = 3.0) use ($alive): bool {
+    for ($end = microtime(true) + $waitS; $alive($pid) && microtime(true) < $end;) {
+        usleep(100000);
+    }
+    return !$alive($pid);
+};
+$pidIn = fn(string $file): int => (int)trim((string)@file_get_contents($file));
+$behave = [
+    'ignores SIGTERM' => ['echo $$ > "$1"; trap "" TERM; echo started; for i in $(seq 12); do sleep 1; done', ''],
+    'closes stdout and keeps running' => ['echo $$ > "$1"; echo started; exec 1>&-; sleep 15', ''],
+    'starts a background process' => ['sleep 300 >/dev/null 2>&1 & echo $! > "$2"; echo $$ > "$1"; echo started; wait', 'background'],
+];
+$n = 0;
+foreach ($behave as $label => [$script, $extra]) {
+    $n++;
+    $pidFile = "$logDir/pid_$n.txt";
+    $bgFile = "$logDir/pid_background_$n.txt";
+    $t = microtime(true);
+    $r = nb_run_logged(['bash', '-c', $script, 'bash', $pidFile, $bgFile], $logDir, $log, 1.0, 1.0);
+    $took = microtime(true) - $t;
+    $pids = array_filter([$pidIn($pidFile), $extra === 'background' ? $pidIn($bgFile) : 0]);
+    $allDead = true;
+    foreach ($pids as $pid) {
+        $allDead = $dead($pid) && $allDead;
+        if ($alive($pid)) {
+            posix_kill($pid, 9); // don't leave it running after the test
+        }
+    }
+    check($r['timed_out'] === true && $r['exit'] === null, "a command that $label is reported as timed out, with no exit code");
+    check($took < 5, "and nb_run_logged returns within the limit plus the grace period (took " . round($took, 1) . 's)');
+    check(count($pids) === ($extra === 'background' ? 2 : 1) && $allDead, "and the command" . ($extra ? ' and what it started are' : ' is') . ' dead afterwards');
+}
 
 echo "the child's command line\n";
 $dir = $video('command');
-$cmd = nb_child_command('chunk-01.md', $dir, ['mining_child_model' => 'sonnet'] + $config);
+$prompt = 'Follow CLAUDE.md in this folder. Process chunk-01.md and write artists.chunk-01.md.';
+$editRule = 'Edit(//' . ltrim((string)realpath($dir), '/') . '/artists.chunk-01.md)';
+$cmd = nb_child_command('chunk-01.md', $dir, ['mining_child_model' => 'sonnet', 'mining_child_max_budget_usd' => 0.5] + $config);
 check($cmd[0] === $fake, 'NB_CLAUDE_BIN is the program to run');
-check($cmd[1] === '-p' && $cmd[2] === 'Follow CLAUDE.md in this folder. Process chunk-01.md and write artists.chunk-01.md.',
-    'headless, with a prompt naming the chunk and artists.<chunk>');
-check(array_slice($cmd, 3, 8) === ['--model', 'sonnet', '--tools', 'Read,Write', '--permission-mode', 'acceptEdits', '--output-format', 'json'],
-    'model from the config, only Read and Write, acceptEdits, JSON output');
-check($cmd[11] === '--settings' && $cmd[13] === '--disable-slash-commands' && count($cmd) === 14, '--settings, then --disable-slash-commands, and nothing else');
-check(json_decode($cmd[12], true) === nb_isolation_settings($dir), "the settings are the isolation settings for the child's folder");
-check(!in_array('--allowedTools', $cmd, true) && !in_array('--dangerously-skip-permissions', $cmd, true) && !in_array('--resume', $cmd, true),
-    'no extra allowances, no permission bypass, no session to resume');
+check($cmd[1] === '-p' && $cmd[2] === $prompt, 'headless, with a prompt naming the chunk and artists.<chunk>');
+$settingsJson = $cmd[16] ?? '';
+$withoutSettings = $cmd;
+$withoutSettings[16] = 'SETTINGS';
+check($withoutSettings === [$fake, '-p', $prompt, '--model', 'sonnet', '--tools', 'Read,Write', '--restricted', '--strict-mcp-config',
+    '--max-budget-usd', '0.5', '--allowedTools', $editRule, '--output-format', 'json', '--settings', 'SETTINGS', '--disable-slash-commands'],
+    'the exact argument list: model, only Read and Write, --restricted, --strict-mcp-config, the budget as a string, one Edit rule, JSON output, settings, no slash commands');
+check(json_decode($settingsJson, true) === nb_isolation_settings($dir), "the settings are the isolation settings for the child's folder");
+check(str_starts_with($cmd[12], 'Edit(//') && !str_starts_with($cmd[12], 'Edit(///') && str_ends_with($cmd[12], '/artists.chunk-01.md)'),
+    'the only allowed edit is this run\'s output file, as an absolute //path');
+check(!in_array('--permission-mode', $cmd, true) && !in_array('acceptEdits', $cmd, true), 'no --permission-mode, so anything not allowed is refused');
+check(!in_array('--dangerously-skip-permissions', $cmd, true) && !in_array('--resume', $cmd, true), 'no permission bypass, no session to resume');
+check(count(array_keys($cmd, '--allowedTools', true)) === 1 && !preg_grep('/^(Bash|WebFetch|WebSearch)/', $cmd), 'one allowed-tools rule and no Bash or web tools');
+$cmd = nb_child_command('chunk-01.md', $dir, ['mining_child_max_budget_usd' => 2.5] + $config);
+check($opt($cmd, '--max-budget-usd') === '2.5', 'the budget comes from mining_child_max_budget_usd');
 $cmd = nb_child_command('chunk-extra.md', $dir, $config);
 check($cmd[2] === 'Follow CLAUDE.md in this folder. Process chunk-extra.md and write artists.chunk-extra.md.', 'the re-run chunk gets its own output name');
+check($cmd[12] === 'Edit(//' . ltrim((string)realpath($dir), '/') . '/artists.chunk-extra.md)', 'and its own Edit rule');
+$link = "$base/command_link";
+if (!is_link($link)) {
+    symlink($dir, $link);
+}
+$cmd = nb_child_command('chunk-01.md', $link, $config);
+check($cmd[12] === $editRule, 'a symlinked folder gives the real path in the Edit rule');
 putenv('NB_CLAUDE_BIN');
 check(nb_child_command('chunk-01.md', $dir, $config)[0] === 'claude', 'the program is `claude` when NB_CLAUDE_BIN is unset');
 putenv("NB_CLAUDE_BIN=$fake");
@@ -146,14 +244,17 @@ file_put_contents("$dir/chunk-01.md", "# T\n\n- [c1] @a -- Burial vibes\n- [c2] 
 $r = nb_run_child('chunk-01.md', $dir, $config);
 check($r['ok'] === true && $r['error'] === null && $r['cost_usd'] === 0.004 && $r['turns'] === 3, 'ok with cost and turns');
 check($r['chunk'] === 'chunk-01.md' && $r['denials'] === [] && is_numeric($r['duration_s']), 'summary has the chunk, no denials and a duration');
-check(array_keys($r) === ['chunk', 'ok', 'error', 'duration_s', 'cost_usd', 'turns', 'denials'], 'summary has exactly the documented fields');
+check(array_keys($r) === ['chunk', 'ok', 'error', 'duration_s', 'cost_usd', 'turns', 'denials', 'tampered'], 'summary has exactly the documented fields, tampered last');
+check(($r['tampered'] ?? null) === [], 'a normal run has nothing tampered with (mine.log and children.jsonl are the runner\'s own)');
 $out = (string)@file_get_contents("$dir/artists.chunk-01.md");
 check($out === "- [c1] Burial\n- [c2] none\n- [c3] Aphex\n", 'the child wrote its output file');
 $call = $lastCall();
 $a = $call['args'];
 check(realpath($call['cwd']) === realpath($dir), 'the child runs inside the video folder');
 check($opt($a, '--tools') === 'Read,Write' && $opt($a, '--model') === 'haiku', 'only Read and Write, on the configured model');
-check($opt($a, '--permission-mode') === 'acceptEdits' && $opt($a, '--output-format') === 'json', 'accepts edits in its folder, JSON output');
+check($opt($a, '--output-format') === 'json' && in_array('--restricted', $a, true) && in_array('--strict-mcp-config', $a, true), 'JSON output, restricted, no MCP servers from config');
+check(!in_array('--permission-mode', $a, true) && $opt($a, '--max-budget-usd') === '0.75', 'no permission mode, and the budget from the config');
+check($opt($a, '--allowedTools') === 'Edit(//' . ltrim((string)realpath($dir), '/') . '/artists.chunk-01.md)', 'the only thing the child may edit is its output file');
 check(in_array('--disable-slash-commands', $a, true), 'skills and commands disabled');
 $settings = json_decode((string)$opt($a, '--settings'), true);
 check(in_array(realpath(nb_root()) . '/CLAUDE.md', $settings['claudeMdExcludes'], true), "the parent's rulebook is excluded");
@@ -230,6 +331,132 @@ check(!is_file("$dir/artists.chunk-01.md"), 'the child was killed before it wrot
 $lines = $jsonl("$dir/children.jsonl");
 check(end($lines)['ok'] === false && str_contains((string)end($lines)['error'], 'timed out'), 'the timeout is in children.jsonl');
 
+echo "stale output\n";
+$dir = $video('stale');
+file_put_contents("$dir/chunk-01.md", "# T\n\n- [c1] @a -- Burial vibes\n");
+file_put_contents("$dir/artists.chunk-01.md", "- [c1] OLD ANSWER\n");
+putenv('NB_FAKE_CHILD_NOWRITE=1');
+$r = nb_run_child('chunk-01.md', $dir, $config);
+putenv('NB_FAKE_CHILD_NOWRITE');
+check($r['ok'] === false && str_contains((string)$r['error'], 'artists.chunk-01.md'), 'an output file left by an earlier run does not make a child that wrote nothing look ok');
+check(!is_file("$dir/artists.chunk-01.md"), 'the old output file was removed before the run');
+check(($r['tampered'] ?? null) === [], 'removing your own old output is not tampering');
+file_put_contents("$dir/artists.chunk-01.md", "- [c1] OLD ANSWER\n");
+putenv('NB_FAKE_CHILD_EMPTY=1');
+$r = nb_run_child('chunk-01.md', $dir, $config);
+putenv('NB_FAKE_CHILD_EMPTY');
+check($r['ok'] === false && str_contains((string)$r['error'], 'artists.chunk-01.md'), 'a child that writes an empty output file is not ok, and the error names the file');
+check(is_file("$dir/artists.chunk-01.md") && filesize("$dir/artists.chunk-01.md") === 0, 'the empty file is what the child left');
+file_put_contents("$dir/artists.chunk-01.md", "- [c1] OLD ANSWER\n");
+$r = nb_run_child('chunk-01.md', $dir, $config);
+check($r['ok'] === true && file_get_contents("$dir/artists.chunk-01.md") === "- [c1] Burial\n", 'a normal run replaces the old output with its own');
+
+echo "the child's result must be a result\n";
+$dir = $video('noresult');
+file_put_contents("$dir/chunk-01.md", "# T\n\n- [c1] @a -- Burial vibes\n");
+foreach (['1' => 'a JSON object with no "type"', 'other' => 'a JSON object whose type is not "result"'] as $mode => $what) {
+    putenv("NB_FAKE_CHILD_NOTYPE=$mode");
+    $r = nb_run_child('chunk-01.md', $dir, $config);
+    putenv('NB_FAKE_CHILD_NOTYPE');
+    check($r['ok'] === false && str_contains((string)$r['error'], 'no JSON result'), "$what is not ok: \"no JSON result\"");
+}
+
+echo "bad chunk names and folders\n";
+$dir = $video('badnames');
+file_put_contents("$dir/chunk-01.md", "# T\n\n- [c1] @a -- Burial vibes\n");
+$runsBefore = count($jsonl($argsFile));
+foreach (['../x', 'chunk-01.md/../..', 'foo.md', '../chunk-01.md', 'chunk-01.md/x', 'chunk-01.md.txt', ''] as $bad) {
+    try {
+        nb_run_child($bad, $dir, $config);
+        check(false, 'chunk name ' . var_export($bad, true) . ' is refused');
+    } catch (InvalidArgumentException $e) {
+        check(true, 'chunk name ' . var_export($bad, true) . ' is refused with an InvalidArgumentException');
+    }
+}
+check(count($jsonl($argsFile)) === $runsBefore, 'and no child was started for any of them');
+$threw = false;
+$r = null;
+set_error_handler(fn() => true); // the missing folder makes PHP warn; only the return value matters here
+try {
+    $r = nb_run_child('chunk-01.md', "$base/no_such_folder", $config);
+} catch (Throwable $e) {
+    $threw = true;
+}
+restore_error_handler();
+check(!$threw, 'a folder that does not exist does not make nb_run_child throw');
+check(is_array($r) && $r['ok'] === false && is_string($r['error']) && $r['error'] !== '' && $r['chunk'] === 'chunk-01.md'
+    && array_keys($r) === ['chunk', 'ok', 'error', 'duration_s', 'cost_usd', 'turns', 'denials', 'tampered'], 'it returns a normal not-ok summary instead');
+check(!is_dir("$base/no_such_folder"), 'and does not create the folder');
+
+echo "a summary line survives bad bytes from the child\n";
+$dir = $video('badutf8');
+file_put_contents("$dir/chunk-01.md", "# T\n\n- [c1] @a -- Burial vibes\n");
+putenv('NB_FAKE_CHILD_BADUTF8=1');
+$r = nb_run_child('chunk-01.md', $dir, $config);
+putenv('NB_FAKE_CHILD_BADUTF8');
+$raw = file("$dir/children.jsonl", FILE_IGNORE_NEW_LINES) ?: [];
+$row = isset($raw[0]) ? json_decode($raw[0], true) : null;
+check(count($raw) === 1 && is_array($row) && $row['chunk'] === 'chunk-01.md', 'children.jsonl gets one real line, not a blank one');
+check($r['chunk'] === 'chunk-01.md' && is_bool($r['ok']), 'and nb_run_child still returns a summary');
+
+echo "tampering\n";
+/** A video folder as the pipeline leaves it before a child runs, with the files a child must not touch. */
+$tamperDir = function (string $name) use ($prepared, $comment): string {
+    $dir = $prepared($name, [$comment('@a', 'Burial vibes'), $comment('@b', 'lol nothing here')]);
+    copy(nb_root() . '/mining/child_CLAUDE.md', "$dir/CLAUDE.md");
+    file_put_contents("$dir/artists.chunk-02.md", "- [c1] Earlier chunk\n");
+    return $dir;
+};
+$protected = ['CLAUDE.md', 'comment_index.json', 'music_mentions_flagged.json', 'chunk-01.md', 'artists.chunk-02.md'];
+$contents = function (string $dir) use ($protected): array {
+    $out = [];
+    foreach ($protected as $f) {
+        $out[$f] = is_file("$dir/$f") ? file_get_contents("$dir/$f") : null;
+    }
+    return $out;
+};
+$dir = $tamperDir('tamper_none');
+$before = $contents($dir);
+check(!in_array(null, $before, true), 'the tamper test folder has every protected file');
+$r = nb_run_child('chunk-01.md', $dir, $config);
+check($r['ok'] === true && ($r['tampered'] ?? null) === [] && $contents($dir) === $before, 'a normal run in that folder is ok, tampered is [] and every protected file is unchanged');
+$cases = [
+    'claude' => [['CLAUDE.md'], true],
+    'removeclaude' => [['CLAUDE.md'], true],
+    'index' => [['comment_index.json'], true],
+    'flagged' => [['music_mentions_flagged.json'], true],
+    'chunk' => [['chunk-01.md'], true],
+    'otherartists' => [['artists.chunk-02.md'], true],
+    'newfile' => [['notes.txt'], false],
+    'newdir' => [['stray_dir'], false],
+    'claudelocal' => [['CLAUDE.local.md'], false],
+    'claude,newfile' => [['CLAUDE.md', 'notes.txt'], true],
+];
+foreach ($cases as $what => [$paths, $restored]) {
+    $dir = $tamperDir('tamper_' . str_replace(',', '_', $what));
+    $before = $contents($dir);
+    putenv("NB_FAKE_CHILD_TAMPER=$what");
+    $r = nb_run_child('chunk-01.md', $dir, $config);
+    putenv('NB_FAKE_CHILD_TAMPER');
+    $tampered = $r['tampered'] ?? null;
+    is_array($tampered) && sort($tampered);
+    check($r['ok'] === false && $tampered === $paths, "$what: not ok, tampered lists " . implode(', ', $paths));
+    check(str_starts_with((string)$r['error'], 'child changed files it must not touch: ')
+        && array_reduce($paths, fn($all, $p) => $all && str_contains((string)$r['error'], $p), true), "$what: the error starts \"child changed files it must not touch:\" and names the path(s)");
+    check($contents($dir) === $before, "$what: every protected file is back as it was" . ($what === 'removeclaude' ? ' (the deleted one recreated)' : ''));
+    if (!$restored) {
+        check(file_exists("$dir/{$paths[0]}"), "$what: the stray " . $paths[0] . ' is left in place, only listed');
+    }
+    $line = $jsonl("$dir/children.jsonl");
+    check(count($line) === 1 && ($line[0]['ok'] ?? null) === false && count($line[0]['tampered'] ?? []) === count($paths), "$what: the tampering is recorded in children.jsonl");
+}
+$dir = $tamperDir('tamper_then_normal');
+putenv('NB_FAKE_CHILD_TAMPER=newfile');
+nb_run_child('chunk-01.md', $dir, $config);
+putenv('NB_FAKE_CHILD_TAMPER');
+$r = nb_run_child('chunk-01.md', $dir, $config);
+check($r['ok'] === true && ($r['tampered'] ?? null) === [], 'a stray file left by an earlier run is not blamed on the next run');
+
 echo "permission denials\n";
 $dir = $video('denials');
 file_put_contents("$dir/chunk-01.md", "# T\n\n- [c1] @a -- Burial vibes\n");
@@ -244,6 +471,8 @@ check($jsonl("$dir/children.jsonl")[0]['denials'] === $r['denials'], 'and are re
 echo "TypeSafe key\n";
 $env = tmp_dir() . '/test.env';
 putenv("NB_ENV_FILE=$env");
+$savedKey = getenv('TYPESAFE_API_KEY');
+putenv('TYPESAFE_API_KEY'); // the cases below are about the file, whatever this shell has set
 $cases = [
     ["# comment\nTYPESAFE_API=\nOTHER=1\n", false, 'an empty key is no key, even with another setting on the next line'],
     ["TYPESAFE_API=abc123\n", true, 'a key is found'],
@@ -257,6 +486,12 @@ $cases = [
     ["TYPESAFE_API=abc123\r\n", true, 'a key in a file with Windows line endings'],
     ["MY_TYPESAFE_API=abc\n", false, 'another setting that merely ends in the name'],
     ["", false, 'an empty file'],
+    ["\xEF\xBB\xBFTYPESAFE_API=abc123\n", true, 'a UTF-8 byte order mark before the key (Windows editors add one)'],
+    ["\xEF\xBB\xBFTYPESAFE_API=\n", false, 'a byte order mark before an empty key'],
+    ["TYPESAFE_API=\"\"\n", false, 'a key of just two double quotes is no key'],
+    ["TYPESAFE_API=''\n", false, 'a key of just two single quotes is no key'],
+    ["TYPESAFE_API=\"abc123\"\n", true, 'a double-quoted key'],
+    ["TYPESAFE_API='abc123'\n", true, 'a single-quoted key'],
 ];
 foreach ($cases as [$content, $want, $label]) {
     file_put_contents($env, $content);
@@ -264,7 +499,17 @@ foreach ($cases as [$content, $want, $label]) {
 }
 putenv('NB_ENV_FILE=' . tmp_dir() . '/no_such.env');
 check(nb_has_typesafe_key() === false, 'a missing .env file is no key');
+putenv('TYPESAFE_API_KEY=abc123');
+check(nb_has_typesafe_key() === true, 'a TYPESAFE_API_KEY in the process environment counts, even with no .env file');
+file_put_contents($env, "TYPESAFE_API=\n");
+putenv("NB_ENV_FILE=$env");
+check(nb_has_typesafe_key() === true, 'and even when the .env file has an empty key');
+putenv('TYPESAFE_API_KEY=');
+check(nb_has_typesafe_key() === false, 'an empty TYPESAFE_API_KEY in the environment is no key');
+putenv($savedKey === false ? 'TYPESAFE_API_KEY' : "TYPESAFE_API_KEY=$savedKey");
 putenv('NB_ENV_FILE');
+$out = (string)shell_exec('cd ' . escapeshellarg(nb_root()) . ' && php -r ' . escapeshellarg('require "lib/mining.php"; echo nb_now();') . ' 2>&1');
+check((bool)preg_match('/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/', trim($out)), 'lib/mining.php can be required on its own (it requires lib/db.php)' . (trim($out) === '' ? '' : ": $out"));
 
 echo "coverage\n";
 $dir = $prepared('coverage', [
@@ -275,7 +520,7 @@ $dir = $prepared('coverage', [
 $covLog = "$dir/mine.log";
 $r = nb_run_child('chunk-01.md', $dir, $config); // the fake leaves the SKIPME comment out
 check($r['ok'] === true, 'the child ran on a prepared chunk');
-$cov = nb_coverage($dir, false, $covLog);
+$cov = nb_coverage($dir, false, $covLog, 60.0);
 check($cov['flagged'] === 3 && $cov['covered'] === 2 && $cov['missed'] === ['c3'] && $cov['unparsed'] === [] && $cov['extra_chunk'] === null,
     'coverage reports the comment the child skipped');
 check(!is_file("$dir/chunk-extra.md"), 'no re-run chunk unless asked');
@@ -298,6 +543,25 @@ try {
     check(str_contains($e->getMessage(), $badLog) && str_contains($e->getMessage(), 'coverage.py'), 'the exception names the log to look in');
     check(str_contains((string)file_get_contents($badLog), 'comment_index.json'), "the script's error is in that log");
 }
+
+echo "coverage time limit\n";
+$fakeBin = $video('fakebin');
+file_put_contents("$fakeBin/python3", "#!/usr/bin/env bash\nsleep 5\necho '{\"flagged\":0,\"covered\":0,\"missed\":[],\"unknown\":[],\"notes\":[],\"unparsed\":[],\"extra_chunk\":null}'\n");
+chmod("$fakeBin/python3", 0755);
+$oldPath = getenv('PATH');
+putenv("PATH=$fakeBin:$oldPath"); // a python3 that takes 5 seconds
+$slowLog = "$fakeBin/slow.log";
+$t = microtime(true);
+$err = null;
+try {
+    nb_coverage($fakeBin, false, $slowLog, 1.0);
+} catch (RuntimeException $e) {
+    $err = $e->getMessage();
+} finally {
+    putenv("PATH=$oldPath");
+}
+check($err !== null && str_contains($err, $slowLog), 'coverage that runs past its time limit throws a RuntimeException naming the log');
+check(microtime(true) - $t < 4, 'and does so at the limit, not when the script finishes');
 
 echo "real comments through the child\n";
 $rows = array_map(fn($l) => json_decode($l, true), file(__DIR__ . '/fixtures/mining/real_comments.jsonl', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES));

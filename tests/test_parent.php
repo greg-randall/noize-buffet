@@ -57,8 +57,25 @@ check(in_array(realpath(nb_root()) . '/comments/**/CLAUDE.md', $settings['claude
 check($settings === nb_parent_settings(), "the settings passed are nb_parent_settings()");
 $isolation = nb_isolation_settings(nb_root());
 $parentSettings = nb_parent_settings();
-check(array_diff($isolation['claudeMdExcludes'], $parentSettings['claudeMdExcludes']) === [] && count($parentSettings['claudeMdExcludes']) === count($isolation['claudeMdExcludes']) + 1,
-    'nb_parent_settings() is the isolation settings plus exactly one more exclusion');
+$commentsDir = realpath(nb_root()) . '/comments';
+$forComments = array_map(fn($f) => "$commentsDir/**/$f", NB_INSTRUCTION_FILES);
+check(array_diff($isolation['claudeMdExcludes'], $parentSettings['claudeMdExcludes']) === [], 'nb_parent_settings() keeps every isolation exclusion');
+check(array_values(array_diff($parentSettings['claudeMdExcludes'], $isolation['claudeMdExcludes'])) === $forComments,
+    'and adds exactly one exclusion under comments/ for every instruction file: ' . implode(', ', NB_INSTRUCTION_FILES));
+foreach (['CLAUDE.md', 'CLAUDE.local.md', '.claude/CLAUDE.md', 'AGENTS.md', '.claude/AGENTS.md', '.claude/rules/**'] as $f) {
+    check(in_array("$commentsDir/**/$f", $parentSettings['claudeMdExcludes'], true), "comments/**/$f is excluded");
+}
+$realDir = tmp_dir() . '/parent_comments_real';
+$linkDir = tmp_dir() . '/parent_comments_link';
+is_dir($realDir) || mkdir($realDir, 0777, true);
+is_link($linkDir) || symlink($realDir, $linkDir);
+putenv("NB_COMMENTS_DIR=$linkDir");
+$viaEnv = nb_parent_settings()['claudeMdExcludes'];
+putenv('NB_COMMENTS_DIR');
+check(in_array(realpath($realDir) . '/**/CLAUDE.md', $viaEnv, true) && in_array(realpath($realDir) . '/**/.claude/rules/**', $viaEnv, true),
+    'NB_COMMENTS_DIR moves the exclusions, with the folder\'s real path');
+check(!in_array($linkDir . '/**/CLAUDE.md', $viaEnv, true) && !in_array($commentsDir . '/**/CLAUDE.md', $viaEnv, true),
+    'and neither the symlink path nor the default comments folder is used any more');
 check($parentSettings['disableAllHooks'] === true && $parentSettings['autoMemoryEnabled'] === false, 'and still turns hooks and auto memory off');
 check(str_contains($lastInput(), 'CLAUDE.md') && str_contains($lastInput(), 'hi there'), 'first message has the intro and the user message');
 check((bool)preg_match('/\(Sent at \d{4}-\d\d-\d\d \d\d:\d\d UTC, unix \d{10}\.\)/', $lastInput()), 'message carries when it was sent');
