@@ -1,12 +1,13 @@
 """Fallback when there's no TypeSafe key: flag comments that look like they name music, by keywords.
 
 Much noisier than TypeSafe, and much less complete: measured on tests/fixtures/mining/real_comments.jsonl
-(564 real comments from 3 videos), it caught only 18 of the 36 comments (50%) that actually named another
-artist -- TypeSafe finds nearly all of them -- and 16 of the 34 comments (47%) it flagged didn't name any
-artist at all (the extraction child then writes "none" for those). It misses names mentioned without any
-cue phrase, dash, or quoted title (e.g. "Taylor Swift stole the flow" has none of those). Writes
-music_mentions_flagged.json in the input's folder in the same shape as find_music_mentions.py, so the rest
-of the pipeline doesn't care which filter ran.
+(564 real comments from 3 videos, using TypeSafe's real flags and the prototype Haiku's real extractions),
+among TypeSafe's 65 flagged comments, 36 actually name another artist per the real Haiku extraction; this
+filter caught only 18 of those 36 (50%). It flagged 34 comments in total, and 15 of those weren't flagged
+by TypeSafe at all -- skimming their text, none of the 15 names an artist. It misses names mentioned
+without any cue phrase, dash, or quoted title (e.g. "Taylor Swift stole the flow" has none of those).
+Writes music_mentions_flagged.json in the input's folder in the same shape as find_music_mentions.py, so
+the rest of the pipeline doesn't care which filter ran.
 
 Usage: python3 mining/keyword_filter.py --input comments/ID/ID.info.json
 """
@@ -19,8 +20,8 @@ from pathlib import Path
 CUES = [
     re.compile(r"\b(sounds? like|reminds? me of|similar to|if you like|fans? of|check out|recommend\w*|"
                r"vibes? like|vibes|think of|brought me here|in the style of|reminiscent of|sampled?|samples|"
-               r"remix\w*|cover of|(?:feat|ft|prod)(?:\.|\b)|produced by|(?:new )?album by|on (?:the )?label|"
-               r"mixtape|playlist|stole|ripped off)\b", re.I),
+               r"remix\w*|cover of|featuring|(?:feat|ft|prod)(?:\.|\b)|produced by|(?:new )?album by|"
+               r"on (?:the )?label|mixtape|playlist|stole|ripped off)\b", re.I),
     re.compile(r"\w-esque\b", re.I),                                 # "Burial-esque"
     re.compile(r"(?<![\d:])\s+[-–—]\s+(?!\d)|\w[–—]\w"),             # "Artist - Song", not "3:45 - the drop"
     re.compile(r"[\"“][^\"“”]{2,80}[\"”]"),                          # a quoted title

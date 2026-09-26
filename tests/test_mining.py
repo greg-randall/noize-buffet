@@ -310,7 +310,7 @@ check(keyword_filter.flag("Radiohead–Creep"), "an unspaced en dash between nam
 
 print("keyword filter: feat/ft/prod don't fire inside ordinary words (review item 8)")
 check(not keyword_filter.flag("what a great feature film"), "'feature' is not mistaken for 'feat'")
-check(not keyword_filter.flag("featuring xyz"), "'featuring' is not mistaken for 'feat'")
+check(keyword_filter.flag("featuring xyz"), "'featuring' is its own cue (follow-up item 3)")
 check(keyword_filter.flag("check this ft. Drake"), "'ft.' followed by a space still cues")
 check(keyword_filter.flag("prod. Metro Boomin on this one"), "'prod.' followed by a space still cues")
 
