@@ -74,6 +74,13 @@ out = mentions.read_mentions(unparsed_file, unparsed_lines)
 check(len(out) == 1 and out[0][0] == 1, "only the well-formed line parses")
 check(unparsed_lines == [(2, "- [c12, c13] Burial"), (3, "some prose the child added")],
       "a near-miss id list and prose are reported as unparsed, blank line skipped")
+notes_file = TMP / "notes_test.md"
+notes_file.write_text('- [c1] Lords of Acid — "Show Me Your" [song]\n- [c2] Two Shell [own artist]\n',
+                      encoding="utf-8")
+read_notes = []
+mentions.read_mentions(notes_file, [], read_notes)
+check(read_notes == ["notes_test.md:1: [song]"],
+      "read_mentions prefixes a recorded note with the file name and line number")
 
 print("song extraction")
 check(mentions.parse_mention("Daft Punk – Get Lucky") == ("Daft Punk", "Get Lucky", ""), "en dash split")
@@ -101,16 +108,60 @@ check(mentions.parse_mention('TNGHT — "I\'m in a hole"') == ("TNGHT", "I'm in 
 check(mentions.parse_mention("'Get Lucky' by Daft Punk") == ("Daft Punk", "Get Lucky", ""),
       "a straight-single-quoted song still works when it's the only quote in the line")
 
-print("bracket notes are dropped, not left in the name")
+print("straight-single-quote fallback stays out of the way of plain apostrophes")
+check(mentions.parse_mention("Liza 'N' Eliaz") == ("Liza 'N' Eliaz", "", ""),
+      "'N' alone (no dash, no other quote) is still not read as a 1-letter song")
+check(mentions.parse_mention("Rock 'n' Roll Soldiers") == ("Rock 'n' Roll Soldiers", "", ""),
+      "'n' is too short and not next to a dash or 'by', so the whole name survives")
+check(mentions.parse_mention("By Divine Right") == ("By Divine Right", "", ""),
+      "a leading 'by ' is only stripped when a quoted song came before it")
+
+print("an empty quoted song counts as no song")
+check(mentions.parse_mention('Kanye West — ""') == ("Kanye West", "", ""),
+      "an empty pair of quotes is not a song, and doesn't leak into the artist or song text")
+
+print("leftovers around quoted songs")
+check(mentions.parse_mention('Daft Punk — "Get Lucky" (Radio Edit)') == ("Daft Punk", "Get Lucky", ""),
+      "a trailing note next to the quote doesn't matter when the song follows a spaced dash")
+check(mentions.parse_mention('"Get Lucky" by Daft Punk (2013)') == ("Daft Punk", "Get Lucky", ""),
+      "a trailing parenthesised note after 'by Artist' is dropped")
+check(mentions.parse_mention('Daft Punk — "A" / "B"') == ("Daft Punk", "A / B", ""),
+      "a lone '/' between two quoted songs never reaches the artist, because the dash-prefix wins")
+check(mentions.parse_mention('Daft Punk ("Get Lucky")') == ("Daft Punk", "Get Lucky", ""),
+      "the empty parentheses left behind when a quote was their whole content are cleaned up")
+
+print("bracket and parenthesis notes are dropped, not left in the name")
 check(mentions.parse_mention("Babylon AD [own artist's album reference]") == ("Babylon AD", "", "own artist"),
       "a bracket note starting with 'own artist' is the own-artist tag, and the whole note is removed")
 check(mentions.parse_mention('Lords of Acid — "Show Me Your" [song]') == ("Lords of Acid", "Show Me Your", ""),
       "an unrecognised bracket note ('[song]') is dropped, not left in the name")
 check(mentions.parse_mention("Marilyn Manson, Lady Gaga [mashup reference]")
       == ("Marilyn Manson, Lady Gaga", "", ""), "an unrecognised bracket note is dropped here too")
+check(mentions.parse_mention("Two Shell (own artist)") == ("Two Shell", "", "own artist"),
+      "a parenthesised 'own artist' note is a tag just like the bracket form")
+check(mentions.parse_mention("Two Shell (unsure)") == ("Two Shell", "", "unsure"),
+      "a parenthesised 'unsure' note is a tag just like the bracket form")
+
+print("hedge words count as unsure")
+check(mentions.parse_mention("Some Artist [maybe]") == ("Some Artist", "", "unsure"), "'maybe' is a hedge")
+check(mentions.parse_mention("Some Artist [probably wrong]") == ("Some Artist", "", "unsure"),
+      "'probably ...' is a hedge")
+check(mentions.parse_mention("Some Artist (likely x)") == ("Some Artist", "", "unsure"), "'likely ...' is a hedge")
+check(mentions.parse_mention("Some Artist [is this right?]") == ("Some Artist", "", "unsure"),
+      "a note ending in '?' is a hedge")
+
+print("removed notes are recorded, not dropped")
+notes = []
+check(mentions.parse_mention('Lords of Acid — "Show Me Your" [song]', notes=notes) == ("Lords of Acid",
+      "Show Me Your", ""), "parse_mention still returns the same result when notes= is given")
+check(notes == ["[song]"], "the dropped note is appended, with its brackets, to the notes list")
+notes = []
+mentions.parse_mention("Two Shell [own artist] [unsure]", notes=notes)
+check(notes == ["[unsure]"], "a losing second tag is recorded as a note too, since only one tag wins")
 
 print("none variants")
-for text in ["none", "None", "[none]", "(none)", "**none**", "None — no artists"]:
+for text in ["none", "None", "[none]", "(none)", "**none**", "None — no artists", "- none", "nothing",
+             "N/A", "n/a", "no artist mentioned", "no artist", "none (not sure who)"]:
     check(mentions.parse_mention(text) == (None, None, "none"), f"none variant: {text!r}")
 
 print("tag precedence")
@@ -211,6 +262,16 @@ check(r2["unparsed"] == ["artists.chunk-01.md:7: prose line"], "the prose line i
 extra2 = (d2 / "chunk-extra.md").read_text(encoding="utf-8")
 check("[c1]" in extra2 and "[c3]" in extra2 and "[c4]" in extra2, "all missed ids go to chunk-extra.md")
 check(extra2.index("[c1]") < extra2.index("[c3]") < extra2.index("[c4]"), "missed ids appear in order")
+
+print("coverage: notes")
+d7 = video_dir("VIDEO000007", [comment(f"id{i}", f"@u{i}", f"text {i}") for i in range(1, 3)])
+prepare.prepare(d7, 150)
+(d7 / "artists.chunk-01.md").write_text(
+    '- [c1] Lords of Acid — "Show Me Your" [song]\n- [c2] Two Shell [own artist]\n', encoding="utf-8")
+r7 = coverage.coverage(d7, write_extra=True)
+check(r7["notes"] == ["artists.chunk-01.md:1: [song]"], "a dropped note surfaces in the coverage result")
+check(json.loads((d7 / "coverage.json").read_text())["notes"] == ["artists.chunk-01.md:1: [song]"],
+      "and in coverage.json")
 
 print("coverage: non-contiguous missed ids")
 d3 = video_dir("VIDEO000003", [comment(f"id{i}", f"@u{i}", f"text {i}") for i in range(1, 6)])

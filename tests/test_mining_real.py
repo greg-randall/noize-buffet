@@ -26,7 +26,7 @@ fails = 0
 def check(cond, msg, examples=None):
     global fails
     print(("  ok    " if cond else "  FAIL  ") + msg)
-    for ex in (examples or [])[:10] if not cond else []:
+    for ex in (examples or []) if not cond else []:
         print(f"          {ex!r}")
     fails += 0 if cond else 1
 
