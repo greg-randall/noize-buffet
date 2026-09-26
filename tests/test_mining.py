@@ -435,5 +435,50 @@ else:
     check("exists" in msg and "does not exist" not in msg,
           "load_api_key notes the .env file exists (but has no key)")
 
+print("merge leads")
+import merge_leads  # noqa: E402
+
+root = TMP / "merge"
+shutil.rmtree(root, ignore_errors=True)
+
+
+def mined(vid, index, artists):
+    d = root / vid
+    d.mkdir(parents=True)
+    (d / "comment_index.json").write_text(json.dumps(index), encoding="utf-8")
+    (d / "artists.chunk-01.md").write_text(artists, encoding="utf-8")
+
+
+def ix(author, text, likes):
+    return {"author": author, "author_id": "UC" + author.strip("@"), "like_count": likes, "text": text,
+            "video_title": "T"}
+
+
+mined("VIDEOAAAAAA", {"c1": ix("@a", "Burial vibes", 10), "c2": ix("@a", "more Burial", 5),
+                      "c3": ix("@b", 'Daft Punk "Get Lucky"', 7), "c4": ix("@c", "Two Shell rules", 1),
+                      "c5": ix("@d", "lol", 0), "c6": ix("@a", "Lone!", 1), "c7": ix("@a", "Lone again", 2)},
+      '- [c1] Burial\n- [c2] Burial\n- [c3] Daft Punk — "Get Lucky"\n- [c4] Two Shell [own artist]\n'
+      '- [c5] none\n- [c6] Lone\n- [c7] Lone\n- [c9] Ghost\n')
+mined("VIDEOBBBBBB", {"c1": ix("@e", "the knife!!", 3), "c2": ix("@f", "Burial again", 2)},
+      "- [c1] The Knife\n- [c2] Burial\n")
+mined("VIDEOCCCCCC", {"c1": ix("@g", "Knife", 1)}, "- [c1] Knife\n")
+r = merge_leads.merge(root)
+by = {lead["name_key"]: lead for lead in r["leads"]}
+check(by["burial"]["people"] == 2 and by["burial"]["mentions"] == 3 and by["burial"]["strength"] == "confirmed",
+      "Burial: 3 mentions by 2 people -> confirmed")
+check(by["burial"]["likes"] == 17 and by["burial"]["examples"][0]["likes"] == 10, "likes summed; examples by likes")
+check(by["lone"]["people"] == 1 and by["lone"]["mentions"] == 2 and by["lone"]["strength"] == "hint",
+      "one person naming Lone twice is still one person -> hint")
+check(by["daftpunk"]["strength"] == "hint" and by["daftpunk"]["songs"] == {"Get Lucky": 1}, "song collected")
+check(by["knife"]["videos"] == 2 and by["knife"]["strength"] == "confirmed"
+      and by["knife"]["name"] in ("The Knife", "Knife"),
+      "'The Knife' and 'Knife' merged; 2 videos -> confirmed")
+check("twoshell" not in by and r["skipped"] == {"own artist": 1, "none": 1}, "own artist and none skipped and counted")
+check(any("c9" in p and "VIDEOAAAAAA" in p for p in r["problems"]), "unknown comment id reported, not silently dropped")
+strengths = [lead["strength"] for lead in r["leads"]]
+check(strengths == sorted(strengths, key=lambda s: s != "confirmed"), "confirmed leads first")
+cli = subprocess.run(["python3", str(ROOT / "mining" / "merge_leads.py"), str(root)], capture_output=True, text=True)
+check(cli.returncode == 0 and len(json.loads(cli.stdout)["leads"]) == len(r["leads"]), "CLI prints the same JSON")
+
 print("ALL PASSED" if fails == 0 else f"FAILED {fails}")
 sys.exit(1 if fails else 0)

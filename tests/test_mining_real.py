@@ -8,7 +8,7 @@ import json
 import re
 import shutil
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -173,6 +173,81 @@ check(all(r["author_id"] == c["author_id"] for r, c in zip(rows, sample)),
       "load_comments keeps author_id from the source comments")
 check(all(r["like_count"] == c["like_count"] for r, c in zip(rows, sample)),
       "load_comments keeps like_count from the source comments")
+
+print("merge_leads on the real per-video folders")
+import merge_leads  # noqa: E402
+
+result = merge_leads.merge(TMP)
+leads_by_key = {lead["name_key"]: lead for lead in result["leads"]}
+
+# Independently reproduce merge_leads' grouping rule straight from the raw fixture (skip own-artist/none,
+# dedup a repeated key within the same comment), so the checks below aren't just re-reading merge()'s own
+# output back at itself.
+SKIP_TAGS = {"own artist", "none"}
+expected = defaultdict(lambda: {"people": set(), "videos": set(), "mentions": 0, "likes": 0})
+skipped_expected = Counter()
+total_lines = 0
+dedup_dropped = 0
+for vid, rows in sorted(by_video.items()):
+    flagged = [c for c in rows if c["typesafe_flagged"]]
+    seen = set()
+    for i, c in enumerate(flagged, 1):
+        for m in c["haiku_mentions"]:
+            total_lines += 1
+            artist, song, tag = mentions.parse_mention(m)
+            if tag in SKIP_TAGS:
+                skipped_expected[tag] += 1
+                continue
+            key = mentions.norm(artist or "")
+            if not key:
+                continue  # would show up under merge()'s "problems"; none expected in this fixture
+            if (key, i) in seen:
+                dedup_dropped += 1  # same comment named the same artist twice (e.g. plain + quoted-song form)
+                continue
+            seen.add((key, i))
+            e = expected[key]
+            e["people"].add(c["author_id"])
+            e["videos"].add(vid)
+            e["mentions"] += 1
+            e["likes"] += c["like_count"]
+
+check(dict(result["skipped"]) == dict(skipped_expected),
+      f"own artist ({skipped_expected['own artist']}) and none ({skipped_expected['none']}) skipped and counted, "
+      "matching the fixture's own tags")
+check(not ({"aliceglass", "sleighbells", "crystalcastles"} & set(leads_by_key)),
+      "Alice Glass, Sleigh Bells and Crystal Castles (tagged own artist in their videos) are not leads",
+      sorted({"aliceglass", "sleighbells", "crystalcastles"} & set(leads_by_key)))
+
+ts = leads_by_key.get("taylorswift")
+ts_expected = expected.get("taylorswift")
+check(ts is not None and ts_expected is not None, "Taylor Swift is a lead")
+if ts is not None and ts_expected is not None:
+    check(ts["people"] == len(ts_expected["people"]) and ts["likes"] == ts_expected["likes"]
+          and ts["mentions"] == ts_expected["mentions"],
+          f"Taylor Swift: people={ts['people']} likes={ts['likes']} mentions={ts['mentions']} match the fixture "
+          f"(expected people={len(ts_expected['people'])} likes={ts_expected['likes']} "
+          f"mentions={ts_expected['mentions']})")
+
+check(all(lead["strength"] in ("confirmed", "hint") for lead in result["leads"]),
+      "every lead's strength is confirmed or hint")
+check(all((lead["strength"] == "confirmed") == (lead["people"] >= 2 or lead["videos"] >= 2)
+          for lead in result["leads"]),
+      "strength follows the 2+ people or 2+ videos rule for every lead")
+
+check(not result["problems"], "no unexplained problems on real data", result["problems"])
+
+leads_mentions_total = sum(lead["mentions"] for lead in result["leads"])
+skipped_total = sum(result["skipped"].values())
+check(leads_mentions_total + skipped_total + dedup_dropped == total_lines,
+      f"every mention line is accounted for: {leads_mentions_total} in leads + {skipped_total} skipped + "
+      f"{dedup_dropped} same-comment duplicate(s) (documented dedup, not data loss) = {total_lines} lines written")
+
+print(f"  info    {len(result['leads'])} leads from {total_lines} mention lines "
+      f"({sum(lead['strength'] == 'confirmed' for lead in result['leads'])} confirmed)")
+print("  info    top 10 leads:")
+for i, lead in enumerate(result["leads"][:10], 1):
+    print(f"  info    {i:2d}. {lead['name']} ({lead['strength']}) - people={lead['people']} "
+          f"videos={lead['videos']} mentions={lead['mentions']} likes={lead['likes']}")
 
 print("ALL PASSED" if fails == 0 else f"FAILED {fails}")
 sys.exit(1 if fails else 0)
