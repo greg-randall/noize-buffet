@@ -64,6 +64,18 @@ function nb_has_typesafe_key(): bool
     return false;
 }
 
+/** Safely append a line to children.jsonl or mine.log only if the file is safe (doesn't exist or is a regular non-symlink file). */
+function nb_append_jsonl(string $path, string $line): bool
+{
+    if (file_exists($path)) {
+        if (!is_file($path) || is_link($path)) {
+            return false;
+        }
+    }
+    $result = file_put_contents($path, $line . "\n", FILE_APPEND | LOCK_EX);
+    return $result !== false;
+}
+
 /** Find the `timeout` command by scanning PATH (no shell). Skip relative entries. */
 function nb_find_timeout(): ?string
 {
@@ -87,8 +99,8 @@ function nb_run_logged(array $cmd, string $cwd, string $logFile, ?float $timeout
     if ($timeoutS !== null && $timeoutS <= 0) {
         throw new InvalidArgumentException("timeoutS must be positive, got $timeoutS");
     }
-    if ($killAfterS < 0) {
-        throw new InvalidArgumentException("killAfterS must be non-negative, got $killAfterS");
+    if ($killAfterS <= 0) {
+        throw new InvalidArgumentException("killAfterS must be positive, got $killAfterS");
     }
 
     // Check for symlink in log path (including dangling symlinks)
@@ -177,8 +189,11 @@ function nb_run_logged(array $cmd, string $cwd, string $logFile, ?float $timeout
                 }
                 usleep(100000); // 0.1 seconds
             }
-            // If still running after grace, extract what we have
-            if ($exit === null) {
+            // If still running after grace, it refused to die; mark as timed out
+            if ($status['running'] && $exit === null) {
+                $timedOut = true;
+                $exit = null;
+            } elseif ($exit === null) {
                 if ($status['signaled']) {
                     $exit = 128 + $status['termsig'];
                 } else {
@@ -198,10 +213,11 @@ function nb_run_logged(array $cmd, string $cwd, string $logFile, ?float $timeout
 
     // Map timeout exit codes to timed_out ONLY if elapsed >= timeoutS - 0.5
     $timeOutExitCodes = [124, 137, 143, 9];
-    $timedOut = false;
-    if ($timeoutS !== null && in_array($exit, $timeOutExitCodes, true) && $duration >= $timeoutS - 0.5) {
-        $timedOut = true;
-        $exit = null;
+    if (!$timedOut) { // Only if not already marked as timed out
+        if ($timeoutS !== null && in_array($exit, $timeOutExitCodes, true) && $duration >= $timeoutS - 0.5) {
+            $timedOut = true;
+            $exit = null;
+        }
     }
 
     fwrite($log, sprintf("[%s] exit %s after %gs%s\n", nb_now(), $exit ?? 'null', $duration, $timedOut ? ' (timed out, killed)' : ''));
@@ -241,18 +257,18 @@ function nb_run_child(string $chunk, string $workDir, array $config): array
         throw new InvalidArgumentException("invalid chunk name: $chunk");
     }
 
+    // Initialize log paths first (before any writes)
+    $mineLog = "$workDir/mine.log";
+    $childrenJsonl = "$workDir/children.jsonl";
+
     // Validate timeout before doing any work
     $timeout = (float)($config['mining_child_timeout_s'] ?? 0);
     if ($timeout <= 0) {
         $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "invalid mining_child_timeout_s: $timeout",
             'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
-        file_put_contents("$workDir/children.jsonl", json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) . "\n", FILE_APPEND | LOCK_EX);
+        nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
         return $summary;
     }
-
-    // Initialize log paths first (before stray checks)
-    $mineLog = "$workDir/mine.log";
-    $childrenJsonl = "$workDir/children.jsonl";
 
     // Check for stray instruction files before anything else
     $strayInstructions = [
@@ -265,18 +281,26 @@ function nb_run_child(string $chunk, string $workDir, array $config): array
             $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: instruction file present: $name",
                 'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
             if (!is_link($childrenJsonl)) {
-                file_put_contents($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) . "\n", FILE_APPEND | LOCK_EX);
+                nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
             }
             return $summary;
         }
     }
 
-    // Check log files are not symlinks
+    // Check log files are not symlinks and are regular files if they exist
     if (is_link($mineLog)) {
         $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: mine.log is a symlink",
             'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
         if (!is_link($childrenJsonl)) {
-            file_put_contents($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) . "\n", FILE_APPEND | LOCK_EX);
+            nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
+        }
+        return $summary;
+    }
+    if (file_exists($mineLog) && !is_file($mineLog)) {
+        $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: mine.log is not a regular file",
+            'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
+        if (!is_link($childrenJsonl) && (!file_exists($childrenJsonl) || (is_file($childrenJsonl) && !is_link($childrenJsonl)))) {
+            nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
         }
         return $summary;
     }
@@ -284,6 +308,12 @@ function nb_run_child(string $chunk, string $workDir, array $config): array
         $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: children.jsonl is a symlink",
             'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
         // Don't write to children.jsonl if it's a symlink to avoid writing through the link
+        return $summary;
+    }
+    if (file_exists($childrenJsonl) && !is_file($childrenJsonl)) {
+        $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: children.jsonl is not a regular file",
+            'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
+        // Can't write the summary if children.jsonl is a folder
         return $summary;
     }
 
@@ -301,7 +331,7 @@ function nb_run_child(string $chunk, string $workDir, array $config): array
             $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: protected file is a symlink: $name",
                 'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
             if (!is_link($childrenJsonl)) {
-                file_put_contents($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) . "\n", FILE_APPEND | LOCK_EX);
+                nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
             }
             return $summary;
         }
@@ -309,7 +339,7 @@ function nb_run_child(string $chunk, string $workDir, array $config): array
             $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: protected path is not a regular file: $name",
                 'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
             if (!is_link($childrenJsonl)) {
-                file_put_contents($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) . "\n", FILE_APPEND | LOCK_EX);
+                nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
             }
             return $summary;
         }
@@ -318,11 +348,19 @@ function nb_run_child(string $chunk, string $workDir, array $config): array
                 $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: protected file is unreadable: $name",
                     'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
                 if (!is_link($childrenJsonl)) {
-                    file_put_contents($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) . "\n", FILE_APPEND | LOCK_EX);
+                    nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
                 }
                 return $summary;
             }
             $bytes = file_get_contents($path);
+            if ($bytes === false) {
+                $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: protected file is unreadable: $name",
+                    'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
+                if (!is_link($childrenJsonl)) {
+                    nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
+                }
+                return $summary;
+            }
             $snapshot[$name] = ['hash' => sha1_file($path), 'bytes' => $bytes];
         } else {
             $snapshot[$name] = null;
@@ -340,7 +378,7 @@ function nb_run_child(string $chunk, string $workDir, array $config): array
                         $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: protected file is a symlink: $f",
                             'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
                         if (!is_link($childrenJsonl)) {
-                            file_put_contents($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) . "\n", FILE_APPEND | LOCK_EX);
+                            nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
                         }
                         return $summary;
                     }
@@ -348,7 +386,7 @@ function nb_run_child(string $chunk, string $workDir, array $config): array
                         $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: protected path is not a regular file: $f",
                             'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
                         if (!is_link($childrenJsonl)) {
-                            file_put_contents($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) . "\n", FILE_APPEND | LOCK_EX);
+                            nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
                         }
                         return $summary;
                     }
@@ -357,11 +395,20 @@ function nb_run_child(string $chunk, string $workDir, array $config): array
                             $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: protected file is unreadable: $f",
                                 'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
                             if (!is_link($childrenJsonl)) {
-                                file_put_contents($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) . "\n", FILE_APPEND | LOCK_EX);
+                                nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
                             }
                             return $summary;
                         }
-                        $snapshot[$f] = ['hash' => sha1_file($path), 'bytes' => file_get_contents($path)];
+                        $bytes = file_get_contents($path);
+                        if ($bytes === false) {
+                            $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: protected file is unreadable: $f",
+                                'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
+                            if (!is_link($childrenJsonl)) {
+                                nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
+                            }
+                            return $summary;
+                        }
+                        $snapshot[$f] = ['hash' => sha1_file($path), 'bytes' => $bytes];
                     } else {
                         $snapshot[$f] = null;
                     }
@@ -381,7 +428,7 @@ function nb_run_child(string $chunk, string $workDir, array $config): array
                         $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: protected file is a symlink: $f",
                             'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
                         if (!is_link($childrenJsonl)) {
-                            file_put_contents($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) . "\n", FILE_APPEND | LOCK_EX);
+                            nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
                         }
                         return $summary;
                     }
@@ -389,12 +436,29 @@ function nb_run_child(string $chunk, string $workDir, array $config): array
                         $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: protected path is not a regular file: $f",
                             'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
                         if (!is_link($childrenJsonl)) {
-                            file_put_contents($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) . "\n", FILE_APPEND | LOCK_EX);
+                            nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
                         }
                         return $summary;
                     }
                     if (is_file($path)) {
-                        $snapshot[$f] = ['hash' => sha1_file($path), 'bytes' => file_get_contents($path)];
+                        if (!is_readable($path)) {
+                            $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: protected file is unreadable: $f",
+                                'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
+                            if (!is_link($childrenJsonl)) {
+                                nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
+                            }
+                            return $summary;
+                        }
+                        $bytes = file_get_contents($path);
+                        if ($bytes === false) {
+                            $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: protected file is unreadable: $f",
+                                'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
+                            if (!is_link($childrenJsonl)) {
+                                nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
+                            }
+                            return $summary;
+                        }
+                        $snapshot[$f] = ['hash' => sha1_file($path), 'bytes' => $bytes];
                     } else {
                         $snapshot[$f] = null;
                     }
@@ -410,18 +474,35 @@ function nb_run_child(string $chunk, string $workDir, array $config): array
             $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "time limit requested but GNU coreutils `timeout` not found on PATH",
                 'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
             if (!is_link($childrenJsonl)) {
-                file_put_contents($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) . "\n", FILE_APPEND | LOCK_EX);
+                nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
             }
             return $summary;
         }
     }
 
-    // Remove stale output file (the link itself, not its target) - only after we know we can run
+    // Check output path is not a non-regular file (directories, etc.) but symlinks are handled separately
     $outputPath = "$workDir/$outputFile";
+    if (file_exists($outputPath) && !is_file($outputPath) && !is_link($outputPath)) {
+        $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: output path is not a regular file: $outputFile",
+            'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
+        if (!is_link($childrenJsonl) && (!file_exists($childrenJsonl) || (is_file($childrenJsonl) && !is_link($childrenJsonl)))) {
+            nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
+        }
+        return $summary;
+    }
+
+    // Remove stale output file (the link itself, not its target) - only after we know we can run
     if (is_link($outputPath)) {
         @unlink($outputPath);
     } elseif (is_file($outputPath)) {
-        @unlink($outputPath);
+        if (!@unlink($outputPath)) {
+            $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: could not remove the old output: $outputFile",
+                'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
+            if (!is_link($childrenJsonl) && (!file_exists($childrenJsonl) || (is_file($childrenJsonl) && !is_link($childrenJsonl)))) {
+                nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
+            }
+            return $summary;
+        }
     }
 
     // Track pre-existing unprotected files with their type, size, and mtime
@@ -451,7 +532,7 @@ function nb_run_child(string $chunk, string $workDir, array $config): array
         $summary = ['chunk' => $chunk, 'ok' => false, 'error' => $e->getMessage(), 'duration_s' => 0.0,
             'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
         if (!is_link($childrenJsonl)) {
-            file_put_contents($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) . "\n", FILE_APPEND | LOCK_EX);
+            nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
         }
         return $summary;
     }
@@ -648,7 +729,7 @@ function nb_run_child(string $chunk, string $workDir, array $config): array
     $summary = ['chunk' => $chunk, 'ok' => $ok, 'error' => $error, 'duration_s' => $r['duration_s'],
         'cost_usd' => $res['total_cost_usd'] ?? null, 'turns' => $res['num_turns'] ?? null, 'denials' => $denials, 'tampered' => $tampered];
     if (!is_link($childrenJsonl)) {
-        file_put_contents($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) . "\n", FILE_APPEND | LOCK_EX);
+        nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
     }
     return $summary;
 }
