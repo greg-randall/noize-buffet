@@ -17,6 +17,7 @@ FIXTURES = HERE / "fixtures" / "mining"
 TMP = HERE / "tmp" / "mining_real"
 sys.path.insert(0, str(ROOT / "mining"))
 import coverage  # noqa: E402
+import keyword_filter  # noqa: E402
 import mentions  # noqa: E402
 import prepare  # noqa: E402
 
@@ -81,6 +82,41 @@ for vid, rows in sorted(by_video.items()):
           f"{vid}: {cov['covered']} of {cov['flagged']} covered by the real answers; the rest listed as missed")
     check(not cov["unparsed"] and not cov["unknown"], f"{vid}: every real answer line parses and refers to a real id",
           cov["unparsed"] + cov["unknown"])
+
+print(f"keyword filter vs TypeSafe on {len(comments)} real comments")
+ts_flagged = [c for c in comments if c["typesafe_flagged"]]
+kw_flagged = [c for c in comments if keyword_filter.flag(c["text"])]
+ts_ids = {(c["video_id"], c["comment_id"]) for c in ts_flagged}
+kw_ids = {(c["video_id"], c["comment_id"]) for c in kw_flagged}
+caught = ts_ids & kw_ids
+extra = kw_ids - ts_ids
+recall = len(caught) / len(ts_ids) * 100 if ts_ids else 0.0
+kw_share = len(kw_flagged) / len(comments) * 100
+print(f"  info    typesafe flagged {len(ts_flagged)} of {len(comments)}")
+print(f"  info    keyword flagged {len(kw_flagged)} of {len(comments)}")
+print(f"  info    keyword catches {len(caught)} of typesafe's {len(ts_ids)} flagged ({recall:.1f}% recall)")
+print(f"  info    keyword flags {len(extra)} comments typesafe didn't flag")
+# Measured on this fixture (2026-09-25): 65 typesafe-flagged, 30 keyword-flagged, 13/65 = 20.0% recall,
+# 17 keyword flags typesafe didn't make, 5.3% of all 564 comments flagged by the keyword filter. The keyword
+# filter is a noisier fallback that misses names mentioned without any cue (e.g. "Taylor Swift stole the
+# flow" has no cue phrase, dash, or quotes), so its recall is low; floors below are conservative, not targets.
+check(recall >= 10.0, f"keyword filter recall stays above a conservative floor (measured {recall:.1f}%, floor 10%)")
+check(kw_share < 15.0, f"keyword filter flags fewer than 15% of all comments (measured {kw_share:.1f}%)")
+
+print("keyword_filter.load_comments keeps author_id and like_count")
+lc_dir = TMP / "load_comments_check"
+shutil.rmtree(lc_dir, ignore_errors=True)
+lc_dir.mkdir(parents=True)
+sample = comments[:5]
+info_json = {"id": sample[0]["video_id"], "title": sample[0]["video_title"],
+             "comments": [{"id": c["comment_id"], "author": c["author"], "author_id": c["author_id"],
+                          "like_count": c["like_count"], "text": c["text"]} for c in sample]}
+(lc_dir / "info.json").write_text(json.dumps(info_json, ensure_ascii=False), encoding="utf-8")
+rows = keyword_filter.load_comments(lc_dir / "info.json")
+check(all(r["author_id"] == c["author_id"] for r, c in zip(rows, sample)),
+      "load_comments keeps author_id from the source comments")
+check(all(r["like_count"] == c["like_count"] for r, c in zip(rows, sample)),
+      "load_comments keeps like_count from the source comments")
 
 print("ALL PASSED" if fails == 0 else f"FAILED {fails}")
 sys.exit(1 if fails else 0)

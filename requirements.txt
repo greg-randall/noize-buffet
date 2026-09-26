@@ -1,0 +1,5 @@
+yt-dlp
+typesafe-sdk
+aiolimiter
+python-dotenv
+tqdm

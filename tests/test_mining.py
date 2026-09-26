@@ -293,5 +293,37 @@ check(r3["missed"] == ["c2", "c5"], "non-contiguous missed ids (c2 and c5)")
 extra3 = (d3 / "chunk-extra.md").read_text(encoding="utf-8")
 check(extra3.index("[c2]") < extra3.index("[c5]"), "missed ids appear in chunk-extra.md in order")
 
+print("filters")
+sys.path.insert(0, str(ROOT / "mining"))
+import keyword_filter  # noqa: E402
+
+check(keyword_filter.flag("if you like this check out Burial"), "cue phrase flagged")
+check(keyword_filter.flag("Daft Punk - Get Lucky is the blueprint"), "Artist - Song flagged")
+check(keyword_filter.flag('that "Archangel" feeling'), "quoted title flagged")
+check(not keyword_filter.flag("love this so much 😭"), "plain praise not flagged")
+vd = TMP / "VIDEO000002"
+shutil.rmtree(vd, ignore_errors=True)
+vd.mkdir(parents=True)
+info = {"id": "VIDEO000002", "title": "Some - Song", "comments": [
+    {"id": "a1", "author": "@ann", "author_id": "UCann", "like_count": 50, "text": "sounds like Burial"},
+    {"id": "a2", "author": "@bob", "author_id": "UCbob", "like_count": 1, "text": "nice"}]}
+(vd / "VIDEO000002.info.json").write_text(json.dumps(info), encoding="utf-8")
+cli = subprocess.run(
+    ["python3", str(ROOT / "mining" / "keyword_filter.py"), "--input", str(vd / "VIDEO000002.info.json")],
+    capture_output=True, text=True)
+out = json.loads((vd / "music_mentions_flagged.json").read_text(encoding="utf-8"))
+row = out["flagged"][0] if out["flagged"] else {}
+check(cli.returncode == 0 and out["filter"] == "keyword" and out["comments_checked"] == 2 and len(out["flagged"]) == 1,
+      "keyword filter writes the flagged file")
+check(row.get("author_id") == "UCann" and row.get("like_count") == 50 and row.get("video_title") == "Some - Song",
+      "flagged rows carry author id, likes and title")
+try:
+    import find_music_mentions  # noqa: E402
+except ImportError as e:
+    print(f"  skip  find_music_mentions (missing package {e.name}; python3 -m pip install -r requirements.txt)")
+else:
+    rows = find_music_mentions.load_comments(vd / "VIDEO000002.info.json")
+    check(rows[0]["author_id"] == "UCann" and rows[0]["like_count"] == 50, "TypeSafe filter keeps author id and likes")
+
 print("ALL PASSED" if fails == 0 else f"FAILED {fails}")
 sys.exit(1 if fails else 0)
