@@ -29,8 +29,13 @@ declare(strict_types=1);
 //     claudelink | indexlink | chunklink   replace CLAUDE.md | comment_index.json | the chunk file with a symlink to NB_FAKE_OUTSIDE
 //     outlink      replaces its own output file with a symlink to NB_FAKE_OUTSIDE
 //     inlink       replaces its own output file with a symlink to the chunk file in the same folder
+//     claudedirfull replaces CLAUDE.md with a folder that has a file in it
+//     minelink | childrenlink   replace mine.log | children.jsonl with a symlink to NB_FAKE_OUTSIDE
+//     infoappend | inforemove | infodir   append to, delete, or replace with a folder the pre-existing video.info.json
 //   NB_FAKE_OUTSIDE=path     the file the *link switches point at (a file outside the folder)
 //   NB_FAKE_CHILD_ERRSUBTYPE=s  an error result with subtype s and "errors": ["Budget limit reached", "second"], no "result" key
+//   NB_FAKE_CHILD_ERRRESULT=1   an error result with "subtype":"success" and "result":"API Error: 500 overloaded"
+//   NB_FAKE_CHILD_ERRODD=1|2    an error result with an array as subtype and non-string items in "errors" (=1: one string item too)
 //   NB_FAKE_CHILD_ERRARRAY=1    an error result whose "result" is an array, not a string
 $args = array_slice($argv, 1);
 file_put_contents((string)getenv('NB_FAKE_ARGS'), json_encode(['args' => $args, 'cwd' => getcwd()], JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
@@ -105,6 +110,12 @@ foreach (array_filter(explode(',', (string)getenv('NB_FAKE_CHILD_TAMPER'))) as $
         'otherchunk' => file_put_contents('chunk-02.md', "- [c99] @evil -- injected\n", FILE_APPEND),
         'extrachunk' => file_put_contents('chunk-extra.md', "- [c99] @evil -- injected\n", FILE_APPEND),
         'extraartists' => file_put_contents('artists.chunk-extra.md', "- [c99] Injected\n", FILE_APPEND),
+        'claudedirfull' => (unlink('CLAUDE.md') && mkdir('CLAUDE.md') && file_put_contents('CLAUDE.md/inside.txt', "in a folder\n") !== false),
+        'minelink' => (unlink('mine.log') && symlink((string)getenv('NB_FAKE_OUTSIDE'), 'mine.log')),
+        'childrenlink' => ((!file_exists('children.jsonl') || unlink('children.jsonl')) && symlink((string)getenv('NB_FAKE_OUTSIDE'), 'children.jsonl')),
+        'infoappend' => file_put_contents('video.info.json', "appended by the child\n", FILE_APPEND),
+        'inforemove' => unlink('video.info.json'),
+        'infodir' => (unlink('video.info.json') && mkdir('video.info.json')),
         'claudedir' => (unlink('CLAUDE.md') && mkdir('CLAUDE.md')),
         'claudelink' => (unlink('CLAUDE.md') && symlink((string)getenv('NB_FAKE_OUTSIDE'), 'CLAUDE.md')),
         'indexlink' => (unlink('comment_index.json') && symlink((string)getenv('NB_FAKE_OUTSIDE'), 'comment_index.json')),
@@ -117,6 +128,17 @@ if (getenv('NB_FAKE_CHILD_ERRSUBTYPE')) {
     echo json_encode(['type' => 'result', 'subtype' => getenv('NB_FAKE_CHILD_ERRSUBTYPE'), 'is_error' => true,
         'errors' => ['Budget limit reached', 'second'], 'num_turns' => 3, 'total_cost_usd' => 0.004, 'permission_denials' => []],
         JSON_UNESCAPED_SLASHES), "\n";
+    exit(1);
+}
+if (getenv('NB_FAKE_CHILD_ERRRESULT')) {
+    echo json_encode(['type' => 'result', 'subtype' => 'success', 'is_error' => true, 'result' => 'API Error: 500 overloaded',
+        'num_turns' => 3, 'total_cost_usd' => 0.004, 'permission_denials' => []], JSON_UNESCAPED_SLASHES), "\n";
+    exit(1);
+}
+if (getenv('NB_FAKE_CHILD_ERRODD')) {
+    echo json_encode(['type' => 'result', 'subtype' => ['x'], 'is_error' => true,
+        'errors' => getenv('NB_FAKE_CHILD_ERRODD') === '1' ? ['first', ['code' => 5], 7, null] : [['code' => 5], 7, null],
+        'num_turns' => 3, 'total_cost_usd' => 0.004, 'permission_denials' => []], JSON_UNESCAPED_SLASHES), "\n";
     exit(1);
 }
 if (getenv('NB_FAKE_CHILD_ERRARRAY')) {
