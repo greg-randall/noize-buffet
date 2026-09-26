@@ -12,11 +12,19 @@ Usage: python3 mining/prepare.py <video folder> [--chunk-size 150]
 """
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mentions import chunk_header, comment_line, video_title  # noqa: E402
+
+
+def write_atomic(path: Path, text: str) -> None:
+    """Write via <name>.tmp and os.replace, so another process never reads a half-written file."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def prepare(folder: Path, chunk_size: int) -> dict:
@@ -30,10 +38,10 @@ def prepare(folder: Path, chunk_size: int) -> dict:
         if old.exists():
             old.unlink()
     index = {f"c{i}": c for i, c in enumerate(flagged, 1)}
-    (folder / "comment_index.json").write_text(json.dumps(index, indent=2, ensure_ascii=False), encoding="utf-8")
+    write_atomic(folder / "comment_index.json", json.dumps(index, indent=2, ensure_ascii=False))
     lines = [comment_line(i, c) for i, c in enumerate(flagged, 1)]
-    (folder / "flagged_comments.md").write_text(
-        "\n".join(chunk_header(title, vid, f"{len(flagged)} flagged comments") + lines) + "\n", encoding="utf-8")
+    write_atomic(folder / "flagged_comments.md",
+                 "\n".join(chunk_header(title, vid, f"{len(flagged)} flagged comments") + lines) + "\n")
     chunks = []
     total = (len(lines) + chunk_size - 1) // chunk_size
     for n in range(total):
@@ -41,7 +49,7 @@ def prepare(folder: Path, chunk_size: int) -> dict:
         first, last = n * chunk_size + 1, n * chunk_size + len(part)
         name = f"chunk-{n + 1:02d}.md"
         note = f"Chunk {n + 1} of {total}: comments c{first} to c{last} ({len(part)} comments)"
-        (folder / name).write_text("\n".join(chunk_header(title, vid, note) + part) + "\n", encoding="utf-8")
+        write_atomic(folder / name, "\n".join(chunk_header(title, vid, note) + part) + "\n")
         chunks.append(name)
     return {"flagged": len(flagged), "chunks": chunks}
 

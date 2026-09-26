@@ -611,7 +611,7 @@ function nb_leads_replace(PDO $pdo, array $leads): void
 function nb_leads(PDO $pdo): array
 {
     $rows = nb_locked($pdo, fn() => $pdo->query("SELECT * FROM leads
-        ORDER BY strength = 'confirmed' DESC, people DESC, videos DESC, likes DESC, name")->fetchAll());
+        ORDER BY strength = 'confirmed' DESC, people DESC, videos DESC, likes DESC, name COLLATE NOCASE")->fetchAll());
     return array_map(function (array $r): array {
         foreach (['songs', 'video_ids', 'examples'] as $k) {
             $r[$k] = json_decode((string)$r["{$k}_json"], true, 512, JSON_THROW_ON_ERROR);

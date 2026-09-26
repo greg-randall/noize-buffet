@@ -180,36 +180,65 @@ import merge_leads  # noqa: E402
 result = merge_leads.merge(TMP)
 leads_by_key = {lead["name_key"]: lead for lead in result["leads"]}
 
-# Independently reproduce merge_leads' grouping rule straight from the raw fixture (skip own-artist/none,
-# dedup a repeated key within the same comment), so the checks below aren't just re-reading merge()'s own
-# output back at itself.
+# Independently reproduce merge_leads' rules straight from the raw fixture, so the checks below aren't just
+# re-reading merge()'s own output back at itself: skip own-artist/none; several lines for the same comment and
+# artist are one mention (their songs merge); a song-only line attaches to the artists in its comment, or,
+# if the comment names none, becomes a songs_only row.
 SKIP_TAGS = {"own artist", "none"}
-expected = defaultdict(lambda: {"people": set(), "videos": set(), "mentions": 0, "likes": 0})
+expected = defaultdict(lambda: {"people": set(), "videos": set(), "mentions": 0, "likes": 0, "songs": Counter()})
+expected_song_rows = defaultdict(lambda: {"mentions": 0, "likes": 0})
 skipped_expected = Counter()
 total_lines = 0
-dedup_dropped = 0
+repeats_merged = 0  # lines repeating a comment+artist already counted (their songs still merge in)
+song_lines_attached = 0  # song-only lines attached to an artist named in the same comment
+empty_keys = 0  # lines whose name has no letters or digits (merge() would report these as problems)
 for vid, rows in sorted(by_video.items()):
     flagged = [c for c in rows if c["typesafe_flagged"]]
-    seen = set()
     for i, c in enumerate(flagged, 1):
+        artist_lines, song_only_lines = [], []
         for m in c["haiku_mentions"]:
             total_lines += 1
             artist, song, tag = mentions.parse_mention(m)
             if tag in SKIP_TAGS:
                 skipped_expected[tag] += 1
                 continue
-            key = mentions.norm(artist or "")
+            is_song_only = artist.startswith("(song) ")
+            key = mentions.norm(song if is_song_only else artist)
             if not key:
-                continue  # would show up under merge()'s "problems"; none expected in this fixture
-            if (key, i) in seen:
-                dedup_dropped += 1  # same comment named the same artist twice (e.g. plain + quoted-song form)
+                empty_keys += 1
                 continue
-            seen.add((key, i))
-            e = expected[key]
-            e["people"].add(c["author_id"])
-            e["videos"].add(vid)
-            e["mentions"] += 1
-            e["likes"] += c["like_count"]
+            (song_only_lines if is_song_only else artist_lines).append((key, song))
+        counted = set()
+        for key, song in artist_lines:
+            if key in counted:
+                repeats_merged += 1
+            else:
+                counted.add(key)
+                e = expected[key]
+                e["people"].add(c["author_id"])
+                e["videos"].add(vid)
+                e["mentions"] += 1
+                e["likes"] += c["like_count"]
+        songs_of = defaultdict(set)  # artist key -> songs for this comment, each counted once
+        for key, song in artist_lines:
+            if song:
+                songs_of[key].add(song)
+        if artist_lines:
+            for _, song in song_only_lines:
+                song_lines_attached += 1
+                for key in counted:
+                    songs_of[key].add(song)
+            for key, songs in songs_of.items():
+                expected[key]["songs"].update(songs)
+        else:
+            row_counted = set()
+            for key, song in song_only_lines:
+                if key in row_counted:
+                    repeats_merged += 1
+                    continue
+                row_counted.add(key)
+                expected_song_rows[key]["mentions"] += 1
+                expected_song_rows[key]["likes"] += c["like_count"]
 
 check(dict(result["skipped"]) == dict(skipped_expected),
       f"own artist ({skipped_expected['own artist']}) and none ({skipped_expected['none']}) skipped and counted, "
@@ -217,6 +246,10 @@ check(dict(result["skipped"]) == dict(skipped_expected),
 check(not ({"aliceglass", "sleighbells", "crystalcastles"} & set(leads_by_key)),
       "Alice Glass, Sleigh Bells and Crystal Castles (tagged own artist in their videos) are not leads",
       sorted({"aliceglass", "sleighbells", "crystalcastles"} & set(leads_by_key)))
+check(empty_keys == 0, f"no fixture line has a name without letters or digits (found {empty_keys})")
+check(not [lead["name"] for lead in result["leads"] if lead["name"].startswith("(song)")],
+      "no lead is a song-only line (none named '(song) ...')", [lead["name"] for lead in result["leads"]
+                                                                if lead["name"].startswith("(song)")])
 
 ts = leads_by_key.get("taylorswift")
 ts_expected = expected.get("taylorswift")
@@ -227,6 +260,21 @@ if ts is not None and ts_expected is not None:
           f"Taylor Swift: people={ts['people']} likes={ts['likes']} mentions={ts['mentions']} match the fixture "
           f"(expected people={len(ts_expected['people'])} likes={ts_expected['likes']} "
           f"mentions={ts_expected['mentions']})")
+    check("Ready for It" in ts["songs"], f"Taylor Swift's songs include 'Ready for It' (songs: {ts['songs']})")
+deftones = leads_by_key.get("deftones")
+check(deftones is not None and "White Pony" in deftones["songs"] and deftones["mentions"] == 1,
+      "Deftones (named twice in one comment) is one mention and keeps the song 'White Pony'")
+
+got = {k: (lead["people"], lead["videos"], lead["mentions"], lead["likes"], lead["songs"])
+       for k, lead in leads_by_key.items()}
+want = {k: (len(e["people"]), len(e["videos"]), e["mentions"], e["likes"], dict(e["songs"]))
+        for k, e in expected.items()}
+check(got == want, f"all {len(want)} leads match the fixture: people, videos, mentions, likes and songs",
+      [(k, got.get(k), want.get(k)) for k in sorted(set(got) | set(want)) if got.get(k) != want.get(k)])
+got_songs = {s["name_key"]: (s["mentions"], s["likes"]) for s in result["songs_only"]}
+want_songs = {k: (e["mentions"], e["likes"]) for k, e in expected_song_rows.items()}
+check(got_songs == want_songs, f"songs_only rows ({len(want_songs)}) match the fixture: comments naming a song "
+      "but no artist")
 
 check(all(lead["strength"] in ("confirmed", "hint") for lead in result["leads"]),
       "every lead's strength is confirmed or hint")
@@ -237,17 +285,22 @@ check(all((lead["strength"] == "confirmed") == (lead["people"] >= 2 or lead["vid
 check(not result["problems"], "no unexplained problems on real data", result["problems"])
 
 leads_mentions_total = sum(lead["mentions"] for lead in result["leads"])
+song_rows_total = sum(s["mentions"] for s in result["songs_only"])
 skipped_total = sum(result["skipped"].values())
-check(leads_mentions_total + skipped_total + dedup_dropped == total_lines,
-      f"every mention line is accounted for: {leads_mentions_total} in leads + {skipped_total} skipped + "
-      f"{dedup_dropped} same-comment duplicate(s) (documented dedup, not data loss) = {total_lines} lines written")
+check(leads_mentions_total + song_rows_total + skipped_total + repeats_merged + song_lines_attached == total_lines,
+      f"every mention line is accounted for: {leads_mentions_total} in leads + {song_rows_total} in songs_only + "
+      f"{skipped_total} skipped + {repeats_merged} repeat line(s) merged into their comment's mention + "
+      f"{song_lines_attached} song-only line(s) attached to an artist = {total_lines} lines written")
 
-print(f"  info    {len(result['leads'])} leads from {total_lines} mention lines "
-      f"({sum(lead['strength'] == 'confirmed' for lead in result['leads'])} confirmed)")
+print(f"  info    {len(result['leads'])} leads and {len(result['songs_only'])} songs without an artist, from "
+      f"{total_lines} mention lines ({sum(lead['strength'] == 'confirmed' for lead in result['leads'])} confirmed)")
 print("  info    top 10 leads:")
 for i, lead in enumerate(result["leads"][:10], 1):
     print(f"  info    {i:2d}. {lead['name']} ({lead['strength']}) - people={lead['people']} "
-          f"videos={lead['videos']} mentions={lead['mentions']} likes={lead['likes']}")
+          f"videos={lead['videos']} mentions={lead['mentions']} likes={lead['likes']}"
+          + (f" songs={list(lead['songs'])}" if lead["songs"] else ""))
+for s in result["songs_only"]:
+    print(f"  info    song without an artist: {s['name']} (mentions={s['mentions']} likes={s['likes']})")
 
 print("ALL PASSED" if fails == 0 else f"FAILED {fails}")
 sys.exit(1 if fails else 0)

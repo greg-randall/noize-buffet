@@ -480,5 +480,79 @@ check(strengths == sorted(strengths, key=lambda s: s != "confirmed"), "confirmed
 cli = subprocess.run(["python3", str(ROOT / "mining" / "merge_leads.py"), str(root)], capture_output=True, text=True)
 check(cli.returncode == 0 and len(json.loads(cli.stdout)["leads"]) == len(r["leads"]), "CLI prints the same JSON")
 
+print("merge leads: repeat lines, song-only lines, unreadable and partial folders")
+root = TMP / "merge2"
+shutil.rmtree(root, ignore_errors=True)
+
+
+def by_key(res):
+    return {lead["name_key"]: lead for lead in res["leads"]}
+
+
+mined("REPEATAAAAA", {"c1": ix("@a", "Deftones and White Pony", 4), "c2": ix("@b", "maybe Lone", 2),
+                      "c3": ix("@c", "the knife", 1), "c4": ix("@d", "Taylor and her song", 6),
+                      "c5": ix("@e", "Ready for It", 3), "c6": ix("@f", "Ready for It, Taylor", 1)},
+      '- [c1] Deftones\n- [c1] Deftones — "White Pony"\n- [c2] Lone [unsure]\n- [c2] Lone\n'
+      '- [c3] The Knife\n- [c3] Knife\n- [c4] Taylor Swift\n- [c4] "Ready for It"\n- [c5] "Ready for It"\n'
+      '- [c6] Someone Else\n- [c6] "Ready for It"\n')
+r = merge_leads.merge(root)
+by = by_key(r)
+check(by["deftones"]["mentions"] == 1 and by["deftones"]["people"] == 1 and by["deftones"]["likes"] == 4
+      and by["deftones"]["songs"] == {"White Pony": 1} and by["deftones"]["examples"][0]["song"] == "White Pony",
+      "repeat lines for one comment and artist merge: 1 mention, 1 like total, the song kept")
+check(by["lone"]["mentions"] == 1 and by["lone"]["unsure_only"] is False
+      and by["lone"]["examples"][0]["unsure"] is False, "[unsure] then a plain line for the same comment clears unsure")
+check(by["knife"]["mentions"] == 1 and by["knife"]["likes"] == 1, "'The Knife' then 'Knife' on one comment: 1 mention")
+check(by["taylorswift"]["songs"] == {"Ready for It": 1} and by["taylorswift"]["examples"][0]["song"] == "Ready for It"
+      and by["taylorswift"]["mentions"] == 1, "a song-only line attaches to the artist named in the same comment")
+check(not any(k.startswith("song") for k in by) and not any(lead["name"].startswith("(song)") for lead in r["leads"]),
+      "song-only lines never become artist leads")
+check([s["name"] for s in r["songs_only"]] == ["Ready for It"] and r["songs_only"][0]["mentions"] == 1
+      and r["songs_only"][0]["examples"][0]["cid"] == "c5" and "strength" not in r["songs_only"][0],
+      "a comment with only a song line gives a songs_only row (no strength)")
+check(by["taylorswift"]["songs"] == {"Ready for It": 1} and by["someoneelse"]["songs"] == {"Ready for It": 1}
+      and by["taylorswift"]["people"] == 1 and by["someoneelse"]["people"] == 1,
+      "the same song under two different artists' comments doesn't merge them")
+cli = subprocess.run(["python3", str(ROOT / "mining" / "merge_leads.py"), str(root)], capture_output=True, text=True)
+check(cli.returncode == 0 and json.loads(cli.stdout)["songs_only"] == r["songs_only"], "CLI JSON has songs_only")
+
+root = TMP / "merge3"
+shutil.rmtree(root, ignore_errors=True)
+mined("GOODAAAAAAA", {"c1": ix("@a", "Burial", 1)}, "- [c1] Burial\n")
+mined("CORRUPTINDEX", {"c1": ix("@a", "x", 1)}, "- [c1] Ghost\n")
+(root / "CORRUPTINDEX" / "comment_index.json").write_text("{not json", encoding="utf-8")
+mined("BADENCODING", {"c1": ix("@a", "x", 1), "c2": ix("@b", "Lone", 1)}, "- [c1] Ghost\n")
+(root / "BADENCODING" / "artists.chunk-01.md").write_bytes(b"- [c1] Ghost \xff\xfe\n")
+(root / "BADENCODING" / "artists.chunk-02.md").write_text("- [c2] Lone\n", encoding="utf-8")
+(root / "NOINDEXXXXX").mkdir()
+(root / "NOINDEXXXXX" / "artists.chunk-01.md").write_text("- [c1] Lost\n", encoding="utf-8")
+(root / "NOOUTPUTXXX").mkdir()
+(root / "NOOUTPUTXXX" / "comment_index.json").write_text(json.dumps({"c1": ix("@a", "x", 1)}), encoding="utf-8")
+mined("NOAUTHORIDXX", {"c1": {"author": "@zed", "like_count": 1, "text": "Arca", "video_title": "T"},
+                       "c2": {"like_count": 1, "text": "Sophie", "video_title": "T"}},
+      "- [c1] Arca\n- [c2] Sophie [remix]\n")
+r = merge_leads.merge(root)
+by = by_key(r)
+check("burial" in by and "lone" in by and "arca" in by, "a corrupt index and a non-UTF-8 file don't stop other folders")
+check(any("CORRUPTINDEX/comment_index.json: could not read" in p for p in r["problems"]),
+      "corrupt comment_index.json is reported under problems")
+check(any("BADENCODING/artists.chunk-01.md: could not read" in p for p in r["problems"]),
+      "non-UTF-8 artists file is reported under problems")
+check(any("NOINDEXXXXX" in p and "no comment_index.json" in p for p in r["problems"]),
+      "artists files without an index are reported under problems")
+check("NOOUTPUTXXX: no extraction output yet" in r["notes"], "an index without artists files is noted")
+check("NOAUTHORIDXX/c1: no author_id; counted by @zed" in r["notes"]
+      and "NOAUTHORIDXX/c2: no author_id; counted by NOAUTHORIDXX:c2" in r["notes"],
+      "author fallbacks are recorded in notes")
+check(any(n.startswith("NOAUTHORIDXX/artists.chunk-01.md:2: ") and "remix" in n for n in r["notes"]),
+      "bracket notes name the video they came from")
+
+root = TMP / "prepare_atomic"
+shutil.rmtree(root, ignore_errors=True)
+root.mkdir(parents=True)
+(root / "music_mentions_flagged.json").write_text(json.dumps({"flagged": [ix("@a", "Burial", 1)]}), encoding="utf-8")
+prepare.prepare(root, 10)
+check(not list(root.glob("*.tmp")) and (root / "comment_index.json").exists(), "prepare leaves no .tmp files behind")
+
 print("ALL PASSED" if fails == 0 else f"FAILED {fails}")
 sys.exit(1 if fails else 0)
