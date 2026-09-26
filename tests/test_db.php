@@ -186,6 +186,7 @@ foreach ([1, 2] as $n) {
     $f = nb_job_enqueue($r, 'refill', ['unplayed' => 3]);
     nb_job_finish($r, (int)nb_job_next($r)['id'], false, null, 'boom', null);
 }
+$past("UPDATE jobs SET created_at = '2002-01-01T00:00:00Z' WHERE kind = 'refill'"); // timestamps have 1-second resolution: keep the order deterministic
 nb_save_listen($r, ['video_id' => 'R0000000002', 'furthest_pct' => 50]);
 check(str_contains(nb_refill_check($r, 5)['why'], 'paused'), 'pause after two failed refills');
 nb_add_batch($r, [$song('R0000000005')], 'asked for in chat', null);
