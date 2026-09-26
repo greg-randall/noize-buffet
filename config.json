@@ -5,5 +5,12 @@
   "session_rotate_turns": 40,
   "job_timeout_s": 600,
   "memory_picks": 2,
-  "refill_when_left": 5
+  "refill_when_left": 5,
+  "mining_workers": 2,
+  "mining_comment_cap": 3000,
+  "mining_chunk_size": 150,
+  "mining_child_model": "haiku",
+  "mining_child_timeout_s": 600,
+  "typesafe_song_threshold": 0.8,
+  "typesafe_artist_threshold": 0.8
 }

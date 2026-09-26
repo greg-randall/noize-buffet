@@ -9,6 +9,13 @@ const NB_CONFIG_DEFAULTS = [
     'job_timeout_s' => 600, // give up on a job (and restart the agent process) after this long
     'memory_picks' => 2, // most songs per batch the agent may pick from its own memory rather than research
     'refill_when_left' => 5, // queue a new batch automatically when this many unplayed songs are left; 0 = off
+    'mining_workers' => 2, // videos mined at the same time
+    'mining_comment_cap' => 3000, // top comments downloaded per video
+    'mining_chunk_size' => 150, // flagged comments per extraction child
+    'mining_child_model' => 'haiku',
+    'mining_child_timeout_s' => 600, // kill an extraction child after this long
+    'typesafe_song_threshold' => 0.8,
+    'typesafe_artist_threshold' => 0.8,
 ];
 
 /** Defaults overlaid with config.json (if present). */
