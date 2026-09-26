@@ -85,6 +85,30 @@ check(mentions.parse_mention("'Get Lucky' by Daft Punk") == ("Daft Punk", "Get L
       "'song' by artist keeps the song and drops the leading 'by'")
 check(mentions.parse_mention("Daft Punk – “Get Lucky”") == ("Daft Punk", "Get Lucky", ""), "curly quotes")
 
+print("apostrophes are not quote marks")
+check(mentions.parse_mention('Brian Eno — "Baby\'s On Fire"') == ("Brian Eno", "Baby's On Fire", ""),
+      "an apostrophe inside a double-quoted song survives")
+check(mentions.parse_mention('Tom Jones — "It\'s Not Unusual"') == ("Tom Jones", "It's Not Unusual", ""),
+      "apostrophe in a contraction inside the quotes")
+check(mentions.parse_mention('Screamin\' Jay Hawkins — "I Put A Spell On You"')
+      == ("Screamin' Jay Hawkins", "I Put A Spell On You", ""),
+      "a trailing apostrophe in the artist name is not mistaken for an opening quote")
+check(mentions.parse_mention('Liza \'N\' Eliaz — "Let the Bassdrum Go"')
+      == ("Liza 'N' Eliaz", "Let the Bassdrum Go", ""),
+      "'N' inside a name is not treated as a second quoted song")
+check(mentions.parse_mention('TNGHT — "I\'m in a hole"') == ("TNGHT", "I'm in a hole", ""),
+      "apostrophe right after the opening quote")
+check(mentions.parse_mention("'Get Lucky' by Daft Punk") == ("Daft Punk", "Get Lucky", ""),
+      "a straight-single-quoted song still works when it's the only quote in the line")
+
+print("bracket notes are dropped, not left in the name")
+check(mentions.parse_mention("Babylon AD [own artist's album reference]") == ("Babylon AD", "", "own artist"),
+      "a bracket note starting with 'own artist' is the own-artist tag, and the whole note is removed")
+check(mentions.parse_mention('Lords of Acid — "Show Me Your" [song]') == ("Lords of Acid", "Show Me Your", ""),
+      "an unrecognised bracket note ('[song]') is dropped, not left in the name")
+check(mentions.parse_mention("Marilyn Manson, Lady Gaga [mashup reference]")
+      == ("Marilyn Manson, Lady Gaga", "", ""), "an unrecognised bracket note is dropped here too")
+
 print("none variants")
 for text in ["none", "None", "[none]", "(none)", "**none**", "None — no artists"]:
     check(mentions.parse_mention(text) == (None, None, "none"), f"none variant: {text!r}")

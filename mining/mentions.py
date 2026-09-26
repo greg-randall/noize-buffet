@@ -14,10 +14,23 @@ from pathlib import Path
 # "- [c 12]: ...". Deliberately loose: near-miss lines (e.g. "[c12, c13] ...") fail to match and are
 # reported as unparsed by read_mentions() rather than silently ignored.
 MENTION_RE = re.compile(r"^\s*(?:[-*•]|\d+[.)])?\s*\**\s*\[\s*c\s*(\d+)\s*\]\s*\**\s*:?\s*(.*?)\s*$", re.I)
-# All the quote pairs the child might use around a song title. Deliberately permissive about which
-# character opens vs. closes (children mix straight and curly quotes), so both sides accept several.
-SONG_RE = re.compile(r"[\"“”«‘']([^\"“”«»‘’']+)[\"“”»’']")
-TAG_RE = re.compile(r"[\[(](own artist|unsure)[\])]", re.I)
+# Quote pairs the child might use around a song title. Each type pairs only with its own closer, and
+# apostrophes are allowed inside all of them (so "Baby's On Fire" or "Boot Scootin' Boogie" survive
+# intact). Straight single quotes are handled separately by _STRAIGHT_SINGLE_RE below, since an
+# apostrophe is also just an apostrophe (Screamin', Liza 'N' Eliaz, Jay-Z's).
+_TYPED_QUOTE_RE = re.compile(r'"([^"]+)"|“([^“”]+)”|«([^«»]+)»|‘([^‘’]+)’')
+# A straight single quote only counts as a quote -- rather than an apostrophe -- when its open side is
+# at the start of the text or after whitespace/a dash, and its close side is at the end of the text or
+# before whitespace/punctuation. Used only as a fallback (see _quoted_songs) when the text has no typed
+# quote at all, e.g. 'Get Lucky' by Daft Punk; this keeps Liza 'N' Eliaz -- "Let the Bassdrum Go" from
+# having "N" misread as a second song, since that line already has a typed (straight-double) quote.
+_STRAIGHT_SINGLE_RE = re.compile(r"(?:^|(?<=[\s\-—–]))'([^']+)'(?=$|[\s,.;:!?)\]}])")
+# A [...] note in the child's line. Exactly "own artist" (or starting with it, e.g. "[own artist's
+# album]") or exactly "unsure" is a recognised tag; anything else ("[song]", "[mashup reference]", ...)
+# is just an annotation and is dropped from the name, never left in place.
+BRACKET_RE = re.compile(r"\[([^\[\]]*)\]")
+OWN_ARTIST_TAG_RE = re.compile(r"\[\s*own artist[^\]]*\]", re.I)
+UNSURE_TAG_RE = re.compile(r"\[\s*unsure\s*\]", re.I)
 # "none" with optional surrounding brackets/bold/punctuation, and an optional trailing explanation
 # after a dash, e.g. "none", "[none]", "**none**", "None — no artists".
 NONE_RE = re.compile(r"[\s*\[(]*none[\s*\])._]*(?:[—–-].*)?", re.I)
@@ -77,27 +90,47 @@ def norm(name: str) -> str:
     return "".join(ch for ch in name if unicodedata.category(ch)[0] in "LN")
 
 
+def _quoted_songs(text: str):
+    """Every quoted song title in `text`, as regex match objects in order of appearance. Typed quotes
+    (straight/curly double, guillemets, curly single) are tried first; the straight-single-quote
+    fallback is only used when none of those appear anywhere in `text` at all -- see _STRAIGHT_SINGLE_RE
+    above for why."""
+    matches = list(_TYPED_QUOTE_RE.finditer(text))
+    return matches if matches else list(_STRAIGHT_SINGLE_RE.finditer(text))
+
+
 def parse_mention(raw: str):
     """(artist, song, tag) from the text after "[cN]"; tag is "", "own artist", "unsure" or "none".
-    If both an "own artist" and an "unsure" tag appear, "own artist" wins; either way both are removed
-    from the name. A song may be quoted (one or more quoted titles, joined with " / " if there's more
-    than one) or follow a spaced dash ("Artist - Song"); an unspaced dash ("Jay-Z") is left alone."""
-    tags = [t.lower() for t in TAG_RE.findall(raw)]
-    if "own artist" in tags:
+    If both an "own artist" and an "unsure" bracket note appear, "own artist" wins; either way both are
+    removed from the name, and so is any other bracket note (an annotation, not part of the name). A
+    song may be quoted (one or more quoted titles, joined with " / " if there's more than one) or follow
+    a spaced dash ("Artist - Song"); an unspaced dash ("Jay-Z") is left alone."""
+    notes = [m.group(1).strip().lower() for m in BRACKET_RE.finditer(raw)]
+    if any(n.startswith("own artist") for n in notes):
         tag = "own artist"
-    elif tags:
+        text = OWN_ARTIST_TAG_RE.sub("", raw)
+    elif any(n == "unsure" for n in notes):
         tag = "unsure"
+        text = UNSURE_TAG_RE.sub("", raw)
     else:
         tag = ""
-    text = TAG_RE.sub("", raw).strip()
+        text = raw
+    text = text.strip()
 
     if NONE_RE.fullmatch(text):
         return None, None, "none"
 
-    songs = [s.strip() for s in SONG_RE.findall(text)]
-    if songs:
-        song = " / ".join(songs)
-        artist = SONG_RE.sub("", text)
+    text = BRACKET_RE.sub("", text).strip()  # drop any other bracket note; it's not part of the name
+
+    matches = _quoted_songs(text)
+    if matches:
+        song = " / ".join(next(g for g in m.groups() if g is not None).strip() for m in matches)
+        pieces, pos = [], 0
+        for m in matches:
+            pieces.append(text[pos:m.start()])
+            pos = m.end()
+        pieces.append(text[pos:])
+        artist = "".join(pieces)
     else:
         artist, song = text, ""
         parts = DASH_SPLIT_RE.split(artist, maxsplit=1)
