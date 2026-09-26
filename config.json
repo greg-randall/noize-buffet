@@ -11,6 +11,7 @@
   "mining_chunk_size": 150,
   "mining_child_model": "haiku",
   "mining_child_timeout_s": 600,
+  "mining_child_max_budget_usd": 1.0,
   "typesafe_song_threshold": 0.8,
   "typesafe_artist_threshold": 0.8
 }

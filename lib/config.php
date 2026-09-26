@@ -14,6 +14,7 @@ const NB_CONFIG_DEFAULTS = [
     'mining_chunk_size' => 150, // flagged comments per extraction child
     'mining_child_model' => 'haiku',
     'mining_child_timeout_s' => 600, // kill an extraction child after this long
+    'mining_child_max_budget_usd' => 1.0,
     'typesafe_song_threshold' => 0.8,
     'typesafe_artist_threshold' => 0.8,
 ];

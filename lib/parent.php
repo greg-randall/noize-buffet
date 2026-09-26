@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/isolation.php';
+require_once __DIR__ . '/mining.php';
 require_once __DIR__ . '/parent_process.php';
 
 // Tools the parent may use without asking. Bash is limited to the two helper scripts.
@@ -53,7 +54,10 @@ function nb_parent_prompt(array $job, bool $newSession): string
 function nb_parent_settings(): array
 {
     $settings = nb_isolation_settings(nb_root());
-    $settings['claudeMdExcludes'][] = (realpath(nb_root()) ?: nb_root()) . '/comments/**/CLAUDE.md';
+    $commentsDir = realpath(nb_comments_dir()) ?: nb_comments_dir();
+    foreach (NB_INSTRUCTION_FILES as $f) {
+        $settings['claudeMdExcludes'][] = "$commentsDir/**/$f";
+    }
     return $settings;
 }
 
@@ -68,6 +72,7 @@ function nb_parent_command(?string $sessionId, array $config): array
         '--tools', NB_PARENT_BUILTIN_TOOLS,
         '--permission-mode', 'acceptEdits',
         '--allowedTools', NB_PARENT_TOOLS,
+        // See only this repo's CLAUDE.md: skip the user's own instructions, hooks, auto memory, skills.
         '--settings', json_encode(nb_parent_settings(), JSON_UNESCAPED_SLASHES),
         '--disable-slash-commands',
     ];
