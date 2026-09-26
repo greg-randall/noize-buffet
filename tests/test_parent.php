@@ -173,12 +173,12 @@ check(!$s['ok'] && str_contains($err, 'exited') && str_contains($err, 'exit code
 check(!$parent->running() && nb_setting($pdo, 'parent_session_id') === null, 'process gone, session cleared');
 
 echo "timeout\n";
-$t = microtime(true);
+$t = hrtime(true); // monotonic: the wall clock has gone backwards on WSL
 $hid = nb_job_enqueue($pdo, 'chat', ['message' => 'FAKE_HANG']);
 $s = nb_run_parent_job($pdo, nb_job_next($pdo), ['job_timeout_s' => 1] + $config, $parent);
 $err = (string)$pdo->query("SELECT error FROM jobs WHERE id = $hid")->fetchColumn();
 check(!$s['ok'] && str_contains($err, 'no reply') && !$parent->running(), 'job failed and process killed');
-check(microtime(true) - $t < 4.5, 'gave up near the timeout, not after the hang');
+check((hrtime(true) - $t) / 1e9 < 4.5, 'gave up near the timeout, not after the hang');
 
 echo "debug output\n";
 $okId = nb_job_enqueue($pdo, 'chat', ['message' => 'debug me']);
