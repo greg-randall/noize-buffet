@@ -7,6 +7,9 @@ require __DIR__ . '/assert.php';
 
 // Everything here uses tests/fake_mining_child.php in place of `claude`: no network, no real model.
 $base = tmp_dir() . '/mining_child';
+// Start from an empty scratch area, so that "was not created" and "is unchanged" checks mean the same on every run.
+exec('rm -rf ' . escapeshellarg($base));
+mkdir($base, 0777, true);
 
 /** A fresh, empty folder under tests/tmp/mining_child/. */
 $video = function (string $name) use ($base): string {
@@ -899,6 +902,7 @@ $threwRuntime = function (callable $f): bool {
 check($threwRuntime(fn() => nb_run_logged(['bash', '-c', 'echo ran > "$1"', 'bash', $ranMarker], $dir, $logLink)), 'nb_run_logged with a log path that is a symlink throws a RuntimeException');
 check(file_get_contents($outside) === $outsideText && !file_exists($ranMarker), 'and the file it pointed at is unchanged and the command did not run');
 $dangling = "$dir/dangling.log";
+@unlink("$base/never_created_by_a_log.txt");
 symlink("$base/never_created_by_a_log.txt", $dangling);
 check($threwRuntime(fn() => nb_run_logged(['bash', '-c', 'echo ran > "$1"', 'bash', $ranMarker], $dir, $dangling, 5.0)) && !file_exists("$base/never_created_by_a_log.txt"),
     'a dangling symlink as the log path is refused too, and its target is not created');
