@@ -83,3 +83,17 @@ A web research report on running the Haiku extraction child with `--restricted` 
 - A tiny budget stops it: capture stdout, stderr and the exit code.
 - With `--no-session-persistence`, no session transcript is written.
 - Turn this into the repeatable `scripts/check_confinement.php` (Stage 3, Task 11) and run it early. Its results decide items 1 to 4 above.
+
+## Confined child runner (`lib/mining.php`): clean-up and known gaps after the security reviews
+
+Deferred on purpose; 437 frozen tests (`tests/test_mining_child.php`) make a behaviour-preserving refactor safe.
+- **Refactor `nb_run_child`** (about 420 lines): the 12-key refusal summary plus guarded write is copied about ten times, the snapshot code appears in three near-identical loops, the restore block three times. Extract `nb_refusal()`, `nb_snapshot_folder()`, `nb_restore_file()`, `nb_scan_top_level()`, `nb_child_error()`. Remove dead code (`$tamperDetected`, an unreachable `$snapshot[$f] = null`); use `array_key_exists` instead of `isset` on snapshot entries that can be null.
+- Derive the stray-instruction-file list from `NB_INSTRUCTION_FILES` (minus CLAUDE.md) so the two can't drift.
+- Resolve `claude` (and `python3` in `nb_coverage`) to an absolute path with the same absolute-only PATH scan used for `timeout`.
+- Watch pre-existing entries with `lstat()` (dangling symlinks warn today; retargeted links would be caught) and look inside pre-existing subdirectories; add `clearstatcache()` after the child returns.
+- A file the child creates that wasn't there before is reported but not undone; it is trusted on the next run. Fine while the caller stops on `tampered`.
+- Two runs in the same folder at once aren't safe (the second flags the first's output). Document that runs are serial, or take an `flock`.
+- If the process still runs after the SIGKILL wait, report `timed_out` true, not exit -1. Docblock: `exit` is null only when `timed_out`.
+- With no time limit, a grandchild holding stdout open makes `nb_run_logged` wait for it (only tests call it without a limit).
+- **Unverified with the real `claude`:** if it creates `.claude/` or `CLAUDE.local.md` in its cwd, the first run is flagged and every later run is refused until a human removes the file. The real confinement check (above) must record what a real run leaves in the folder.
+- **Timing on WSL:** `microtime(true)` went backwards on this machine ("exit 124 after -0.5s"). `lib/mining.php` now uses `hrtime`; other code still uses `microtime` for durations (e.g. `scripts/job_worker.php` job times, `lib/parent.php`), so those can show negative or wrong times here. Switch them to `hrtime`.
