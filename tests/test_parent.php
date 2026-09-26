@@ -53,6 +53,13 @@ check(in_array('--disable-slash-commands', $a, true), 'skills and commands disab
 $settings = json_decode((string)$opt($a, '--settings'), true);
 check(is_array($settings) && $settings['disableAllHooks'] === true && $settings['autoMemoryEnabled'] === false, 'isolation settings passed');
 check(!in_array(realpath(nb_root()) . '/CLAUDE.md', $settings['claudeMdExcludes'], true), "the repo's own CLAUDE.md is not excluded");
+check(in_array(realpath(nb_root()) . '/comments/**/CLAUDE.md', $settings['claudeMdExcludes'], true), "mining children's CLAUDE.md files are excluded");
+check($settings === nb_parent_settings(), "the settings passed are nb_parent_settings()");
+$isolation = nb_isolation_settings(nb_root());
+$parentSettings = nb_parent_settings();
+check(array_diff($isolation['claudeMdExcludes'], $parentSettings['claudeMdExcludes']) === [] && count($parentSettings['claudeMdExcludes']) === count($isolation['claudeMdExcludes']) + 1,
+    'nb_parent_settings() is the isolation settings plus exactly one more exclusion');
+check($parentSettings['disableAllHooks'] === true && $parentSettings['autoMemoryEnabled'] === false, 'and still turns hooks and auto memory off');
 check(str_contains($lastInput(), 'CLAUDE.md') && str_contains($lastInput(), 'hi there'), 'first message has the intro and the user message');
 check((bool)preg_match('/\(Sent at \d{4}-\d\d-\d\d \d\d:\d\d UTC, unix \d{10}\.\)/', $lastInput()), 'message carries when it was sent');
 $last = nb_chat_since($pdo, 0);
