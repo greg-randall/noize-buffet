@@ -183,7 +183,7 @@ $r = nb_run_logged(['bash', '-c', 'exit 143'], $logDir, $log);
 check($r['timed_out'] === false && $r['exit'] === 143, 'with no limit at all, exit 143 is just exit 143');
 
 echo "time limits must be positive\n";
-foreach ([['timeout 0.0', 0.0, 5.0], ['a negative timeout', -1.0, 5.0], ['a negative kill-after', 5.0, -1.0]] as $n => [$what, $limit, $grace]) {
+foreach ([['timeout 0.0', 0.0, 5.0], ['a negative timeout', -1.0, 5.0], ['a negative kill-after', 5.0, -1.0], ['a kill-after of 0 (GNU timeout would never KILL)', 5.0, 0.0]] as $n => [$what, $limit, $grace]) {
     $marker = "$logDir/ran_$n.txt";
     $freshLog = "$logDir/never_made_$n.log";
     check($refuses(fn() => nb_run_logged(['bash', '-c', 'echo ran > "$1"', 'bash', $marker], $logDir, $freshLog, $limit, $grace)),
@@ -1153,6 +1153,75 @@ check($artists($idOf('Danny Harf')) === [null] && $byId[$idOf('Danny Harf')][0][
 $cov = nb_coverage($dir, false, "$dir/mine.log");
 check($cov['flagged'] === 18 && $cov['covered'] === 18 && $cov['missed'] === [], 'coverage reports zero missed');
 check($cov['unparsed'] === [] && $cov['unknown'] === [], 'and nothing unparsed or unknown');
+
+echo "children.jsonl and mine.log: one safe way to write\n";
+$keysOfSummary = ['chunk', 'ok', 'error', 'duration_s', 'cost_usd', 'turns', 'denials', 'tampered'];
+$dir = $tamperDirAll('safe_append_timeout_symlink');
+file_put_contents($outside, $outsideText);
+symlink($outside, "$dir/children.jsonl");
+$runsBefore = count($jsonl($argsFile));
+[$r, $warnings] = $capture(fn() => nb_run_child('chunk-01.md', $dir, ['mining_child_timeout_s' => 0] + $config));
+check($r['ok'] === false && is_string($r['error']) && $r['error'] !== '' && array_keys($r) === $keysOfSummary, 'an invalid timeout with children.jsonl a symlink: still the normal not-ok refusal');
+check(file_get_contents($outside) === $outsideText && is_link("$dir/children.jsonl") && count($jsonl($argsFile)) === $runsBefore && $warnings === [],
+    'and nothing is written through the link: the target is unchanged, the link is still there, no child was started, no PHP warnings');
+foreach (['children.jsonl', 'mine.log'] as $logName) {
+    foreach (['a normal run' => $config, 'an invalid timeout' => ['mining_child_timeout_s' => 0] + $config] as $when => $cfg) {
+        $dir = $tamperDirAll('safe_append_dir_' . preg_replace('/\W/', '_', $logName) . '_' . preg_replace('/\W/', '_', $when));
+        mkdir("$dir/$logName");
+        $runsBefore = count($jsonl($argsFile));
+        $t = hrtime(true);
+        [$r, $warnings] = $capture(fn() => nb_run_child('chunk-01.md', $dir, $cfg));
+        $took = (hrtime(true) - $t) / 1e9;
+        check($took < 10 && $r['ok'] === false && array_keys($r) === $keysOfSummary, "$logName is a folder ($when): returns promptly with a not-ok summary");
+        if ($when === 'a normal run') {
+            check(str_starts_with((string)$r['error'], "refusing to run: $logName is not a regular file"), "$logName is a folder: the error is \"refusing to run: $logName is not a regular file\"");
+        }
+        check(is_dir("$dir/$logName") && scandir("$dir/$logName") === ['.', '..'] && count($jsonl($argsFile)) === $runsBefore && $warnings === [],
+            "$logName is a folder ($when): the folder is untouched, no child was started, no PHP warnings");
+    }
+}
+$dir = $tamperDirAll('safe_append_dir_and_protected_symlink');
+mkdir("$dir/children.jsonl");
+rename("$dir/CLAUDE.md", "$dir/moved_away.txt");
+symlink($outside, "$dir/CLAUDE.md");
+file_put_contents($outside, $outsideText);
+$t = hrtime(true);
+[$r, $warnings] = $capture(fn() => nb_run_child('chunk-01.md', $dir, $config));
+check((hrtime(true) - $t) / 1e9 < 10 && $r['ok'] === false && scandir("$dir/children.jsonl") === ['.', '..'] && file_get_contents($outside) === $outsideText && $warnings === [],
+    'a refusal for another reason does not write its summary into a children.jsonl that is a folder');
+foreach (['children.jsonl', 'mine.log'] as $logName) {
+    $dir = $tamperDirAll('safe_append_fifo_' . preg_replace('/\W/', '_', $logName));
+    if (function_exists('posix_mkfifo') && @posix_mkfifo("$dir/$logName", 0644)) {
+        $code = 'require ' . var_export(nb_root() . '/lib/db.php', true) . '; require ' . var_export(nb_root() . '/lib/config.php', true)
+            . '; require ' . var_export(nb_root() . '/lib/mining.php', true) . '; echo json_encode(nb_run_child("chunk-01.md", $argv[1], json_decode($argv[2], true)));';
+        $t = hrtime(true);
+        $out = shell_exec('timeout 20 ' . escapeshellarg(PHP_BINARY) . ' -r ' . escapeshellarg($code) . ' ' . escapeshellarg($dir) . ' ' . escapeshellarg(json_encode($config)) . ' 2>&1');
+        $row = json_decode((string)$out, true);
+        check((hrtime(true) - $t) / 1e9 < 15 && is_array($row) && $row['ok'] === false && str_starts_with((string)$row['error'], "refusing to run: $logName is not a regular file"),
+            "$logName is a FIFO: returns promptly, refusing to run, without waiting for a reader");
+    } else {
+        check(true, "skipped the $logName FIFO check: this platform or filesystem cannot make a FIFO");
+    }
+}
+
+echo "the output path itself\n";
+foreach (['an empty folder' => false, 'a folder with a file in it' => true] as $desc => $withFile) {
+    $dir = $tamperDirAll('output_is_dir_' . ($withFile ? 'full' : 'empty'));
+    mkdir("$dir/artists.chunk-01.md");
+    if ($withFile) {
+        file_put_contents("$dir/artists.chunk-01.md/inside.txt", "keep\n");
+    }
+    $runsBefore = count($jsonl($argsFile));
+    [$r, $warnings] = $capture(fn() => nb_run_child('chunk-01.md', $dir, $config));
+    check($r['ok'] === false && str_starts_with((string)$r['error'], 'refusing to run: output path is not a regular file: artists.chunk-01.md') && array_keys($r) === $keysOfSummary,
+        "artists.chunk-01.md is $desc: refusing to run, with a normal not-ok summary");
+    check(is_dir("$dir/artists.chunk-01.md") && scandir("$dir/artists.chunk-01.md") === ($withFile ? ['.', '..', 'inside.txt'] : ['.', '..'])
+        && count($jsonl($argsFile)) === $runsBefore && $warnings === [], "artists.chunk-01.md is $desc: it is untouched, no child was started, no PHP warnings");
+}
+$dir = $tamperDirAll('output_stale_regular');
+file_put_contents("$dir/artists.chunk-01.md", "- [c1] OLD ANSWER\n");
+$r = nb_run_child('chunk-01.md', $dir, $config);
+check($r['ok'] === true && file_get_contents("$dir/artists.chunk-01.md") === "- [c1] Burial\n- [c2] none\n", 'an ordinary stale output file is still removed and the run goes ahead');
 
 echo "small things\n";
 $dir = $tamperDirAll('timeout_first');
