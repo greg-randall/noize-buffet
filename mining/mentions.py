@@ -2,15 +2,33 @@
 
 Comments appear to the extraction child as "- [c12] @author -- text". The child answers with one line per
 name: "- [c12] Burial", '- [c13] Daft Punk — "Get Lucky"', "- [c14] Two Shell [own artist]",
-"- [c15] Name [unsure]" or "- [c16] none".
+"- [c15] Name [unsure]" or "- [c16] none". Children don't always follow the format exactly (bold markers,
+numbered lists, a stray comma-separated id list, prose); MENTION_RE is loosened to accept common near-miss
+list styles, and read_mentions() reports lines it still can't parse rather than dropping them.
 """
 import re
 import unicodedata
 from pathlib import Path
 
-MENTION_RE = re.compile(r"^\s*-\s*\[c(\d+)\]\s*(.*?)\s*$")
-SONG_RE = re.compile(r"[\"“”]([^\"“”]+)[\"“”]")
+# Accepts "- [c12] ...", "* [c12] ...", "1. [c12] ...", "[c12] ...", "- [C12] ...", "- **[c12]** ...",
+# "- [c 12]: ...". Deliberately loose: near-miss lines (e.g. "[c12, c13] ...") fail to match and are
+# reported as unparsed by read_mentions() rather than silently ignored.
+MENTION_RE = re.compile(r"^\s*(?:[-*•]|\d+[.)])?\s*\**\s*\[\s*c\s*(\d+)\s*\]\s*\**\s*:?\s*(.*?)\s*$", re.I)
+# All the quote pairs the child might use around a song title. Deliberately permissive about which
+# character opens vs. closes (children mix straight and curly quotes), so both sides accept several.
+SONG_RE = re.compile(r"[\"“”«‘']([^\"“”«»‘’']+)[\"“”»’']")
 TAG_RE = re.compile(r"[\[(](own artist|unsure)[\])]", re.I)
+# "none" with optional surrounding brackets/bold/punctuation, and an optional trailing explanation
+# after a dash, e.g. "none", "[none]", "**none**", "None — no artists".
+NONE_RE = re.compile(r"[\s*\[(]*none[\s*\])._]*(?:[—–-].*)?", re.I)
+# A spaced dash separates artist from song ("Daft Punk - Get Lucky"); an unspaced dash inside a name
+# ("Jay-Z") must NOT split.
+DASH_SPLIT_RE = re.compile(r"\s+[—–-]\s+")
+# Trailing/leading punctuation trimmed off the display name once the song (if any) has been pulled out.
+STRIP_CHARS = " -—–:*`\"',;"
+# A newline appearing inside a comment's or a line's text, in every form we've seen (CRLF, lone CR or
+# LF, and NEL \x85, which some transcripts use).
+NEWLINE_RE = re.compile(r"\r\n|[\r\n\x85]")
 
 # The trim set used at both ends of norm() and after a leading "the": Unicode separator categories
 # (Zs/Zl/Zp, i.e. category starting with "Z") plus the five ASCII whitespace controls tab/LF/VT/FF/CR.
@@ -45,10 +63,13 @@ def _drop_leading_the(name: str) -> str:
 
 
 def norm(name: str) -> str:
-    """Grouping key for an artist name. Must match nb_name_key() in lib/db.php step for step:
-    trim whitespace (Unicode separators + tab/LF/VT/FF/CR, NBSP included), lowercase, NFKD and drop
-    combining marks, lowercase again, final sigma to sigma, drop a leading "the" + whitespace, keep
-    letters and digits."""
+    """Grouping key for an artist name, used only to group mentions within merge_leads.py's own run.
+    Must match nb_name_key() in lib/db.php step for step (tests/test_mining.py checks this on a fixed
+    name list, as a sanity check, but the two sides never compare keys at runtime: PHP always computes
+    its own nb_name_key() from a lead's stored name when it needs one, e.g. for mutes or the mining
+    queue, rather than trusting a key this module produced): trim whitespace (Unicode separators +
+    tab/LF/VT/FF/CR, NBSP included), lowercase, NFKD and drop combining marks, lowercase again, final
+    sigma to sigma, drop a leading "the" + whitespace, keep letters and digits."""
     # Unicode categories rather than combining()/isalnum(), to match PHP's \p{Mn} and \p{L}\p{N} exactly
     name = unicodedata.normalize("NFKD", _strip_ws(name).lower())
     name = "".join(ch for ch in name if unicodedata.category(ch) != "Mn").lower().replace("ς", "σ")
@@ -57,37 +78,73 @@ def norm(name: str) -> str:
 
 
 def parse_mention(raw: str):
-    """(artist, song, tag) from the text after "[cN]"; tag is "", "own artist", "unsure" or "none"."""
-    tag_match = TAG_RE.search(raw)
-    tag = tag_match.group(1).lower() if tag_match else ""
+    """(artist, song, tag) from the text after "[cN]"; tag is "", "own artist", "unsure" or "none".
+    If both an "own artist" and an "unsure" tag appear, "own artist" wins; either way both are removed
+    from the name. A song may be quoted (one or more quoted titles, joined with " / " if there's more
+    than one) or follow a spaced dash ("Artist - Song"); an unspaced dash ("Jay-Z") is left alone."""
+    tags = [t.lower() for t in TAG_RE.findall(raw)]
+    if "own artist" in tags:
+        tag = "own artist"
+    elif tags:
+        tag = "unsure"
+    else:
+        tag = ""
     text = TAG_RE.sub("", raw).strip()
-    if text.lower().strip(" .") == "none":
+
+    if NONE_RE.fullmatch(text):
         return None, None, "none"
-    song_match = SONG_RE.search(text)
-    song = song_match.group(1).strip() if song_match else ""
-    artist = SONG_RE.sub("", text)
-    artist = re.split(r"\s+[—–-]\s*$|\s+[—–-]\s+", artist)[0].strip(" -—–:*").strip()
+
+    songs = [s.strip() for s in SONG_RE.findall(text)]
+    if songs:
+        song = " / ".join(songs)
+        artist = SONG_RE.sub("", text)
+    else:
+        artist, song = text, ""
+        parts = DASH_SPLIT_RE.split(artist, maxsplit=1)
+        if len(parts) == 2:
+            artist, song = (p.strip() for p in parts)
+
+    artist = artist.strip(STRIP_CHARS)
+    artist = re.sub(r"^by\s+", "", artist, flags=re.I).strip(STRIP_CHARS)
+    if artist.endswith(".") and artist.count(".") == 1:
+        artist = artist[:-1]
     if not artist and song:  # the line named only a song
         artist = f'(song) "{song}"'
     return artist, song, tag
 
 
-def read_mentions(path: Path):
-    """Every [cN] line in a child's output file, as (cid, artist, song, tag); other lines are ignored."""
+def read_mentions(path: Path, unparsed: list = None):
+    """Every [cN] line in a child's output file, as (cid, artist, song, tag).
+    If `unparsed` is a list, every other non-blank line is appended to it as (line_number, line), so
+    the caller can report near-misses (a stray comma-separated id list, prose the child added) instead
+    of silently dropping them."""
     out = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         m = MENTION_RE.match(line)
         if m:
             artist, song, tag = parse_mention(m.group(2))
             out.append((int(m.group(1)), artist, song, tag))
+        elif unparsed is not None and line.strip():
+            unparsed.append((lineno, line))
     return out
 
 
 def comment_line(cid: int, comment: dict) -> str:
     """One comment as it appears in flagged_comments.md and the chunk files."""
-    text = comment["text"].replace("\r\n", "\n").replace("\n", "<br>")
+    text = NEWLINE_RE.sub("<br>", comment["text"])
     return f"- [c{cid}] {comment['author']} -- {text}"
 
 
 def chunk_header(title: str, video_id: str, note: str) -> list:
     return [f"# {title}", "", f"https://www.youtube.com/watch?v={video_id}", "", note, ""]
+
+
+def video_title(comments, vid: str) -> str:
+    """The video's title, taken from the first comment that has one, or the video id if there are no
+    comments or none carries a title. Newlines are replaced with spaces since this feeds a Markdown
+    header line."""
+    for c in comments:
+        title = c.get("video_title")
+        if title:
+            return NEWLINE_RE.sub(" ", str(title))
+    return vid

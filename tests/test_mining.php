@@ -116,6 +116,6 @@ check(nb_name_key("\u{00A0}The Knife") === 'knife', 'unicode whitespace (NBSP) t
 check(nb_name_key('ΣΑΣ') === 'σασ', 'a final sigma is normalised to a regular sigma');
 check(nb_name_key('Theatre of Tragedy') === 'theatreoftragedy', '"the" is only dropped as a whole word, not as a prefix');
 check(nb_name_key('ℌello') === 'hello', 'compatibility-decomposed letter-like symbols fold to plain letters');
-check(nb_name_key("Bj\xF6rk") !== '', 'an invalid UTF-8 byte is scrubbed, not left to collapse the key to empty');
+check(nb_name_key("Bj\xF6rk") === 'bjrk', 'an invalid UTF-8 byte is scrubbed (not left to collapse the key to empty)');
 
 finish();

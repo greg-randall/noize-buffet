@@ -4,7 +4,8 @@ Reads music_mentions_flagged.json in the video folder and writes there:
     comment_index.json   {"c1": {comment fields}, ...}: what each [cN] refers to
     flagged_comments.md  every flagged comment, one line each: "- [cN] @author -- text"
     chunk-01.md, ...     the same lines in chunks of --chunk-size
-Old chunk-*.md and artists.chunk-*.md files from an earlier run are removed first.
+Old chunk-*.md and artists.chunk-*.md files from an earlier run are removed first (this also covers
+chunk-extra.md and artists.chunk-extra.md, which match those globs), along with a stale coverage.json.
 Prints {"flagged": N, "chunks": ["chunk-01.md", ...]}.
 
 Usage: python3 mining/prepare.py <video folder> [--chunk-size 150]
@@ -15,15 +16,19 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from mentions import chunk_header, comment_line  # noqa: E402
+from mentions import chunk_header, comment_line, video_title  # noqa: E402
 
 
 def prepare(folder: Path, chunk_size: int) -> dict:
+    if chunk_size < 1:
+        raise ValueError("chunk_size must be at least 1")
     flagged = json.loads((folder / "music_mentions_flagged.json").read_text(encoding="utf-8"))["flagged"]
     vid = folder.name
-    title = flagged[0].get("video_title", vid) if flagged else vid
-    for old in list(folder.glob("chunk-*.md")) + list(folder.glob("artists.chunk-*.md")):
-        old.unlink()
+    title = video_title(flagged, vid)
+    stale = list(folder.glob("chunk-*.md")) + list(folder.glob("artists.chunk-*.md")) + [folder / "coverage.json"]
+    for old in stale:
+        if old.exists():
+            old.unlink()
     index = {f"c{i}": c for i, c in enumerate(flagged, 1)}
     (folder / "comment_index.json").write_text(json.dumps(index, indent=2, ensure_ascii=False), encoding="utf-8")
     lines = [comment_line(i, c) for i, c in enumerate(flagged, 1)]
