@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Check requirements, then start noize-buffet: the web server and the agent worker together.
+"""Check requirements, then start noize-buffet: the web server, the agent worker and the comment-mining worker together.
 
 Usage: python3 start.py                     (port 8000, or a random free one from 8001-8999 if 8000 is taken)
        NB_PORT=8080 python3 start.py        (exactly this port)
        python3 start.py --no-typesafe       (run without a TypeSafe API key)
        python3 start.py --reset             (stop this folder's old servers, delete all your data, start fresh)
 
-Ctrl+C stops both.
+Ctrl+C stops them all.
 """
 import argparse
 import os
@@ -26,7 +26,7 @@ DEFAULT_PORT = 8000
 FALLBACK_PORTS = range(8001, 9000)
 FALLBACK_TRIES = 25
 # What --reset deletes: everything a run creates. .env and config.json are kept.
-RESET_PATHS = ["data", "brief.md", "taste.md"]
+RESET_PATHS = ["data", "brief.md", "taste.md", "comments"]
 
 
 def report(ok, name, fix=""):
@@ -70,14 +70,16 @@ def check_env(no_typesafe):
         shutil.copyfile(example, env_file)
         print(f"  created {env_file.name} from {example.name}")
     text = env_file.read_text(encoding="utf-8") if env_file.exists() else ""
-    has_key = bool(re.search(r"^\s*TYPESAFE_API(_KEY)?\s*=\s*\S+", text, re.M))
+    has_key = bool(re.search(r"^[ \t]*TYPESAFE_API(_KEY)?[ \t]*=[ \t]*\S+", text, re.M))
     if has_key:
         report(True, "TypeSafe API key in .env")
+        if not check_typesafe_packages():
+            sys.exit("\nInstall the missing packages above, then run python3 start.py again.")
         return
     bar = "!" * 72
     message = (f"\n{bar}\n"
                "  No TypeSafe API key found in .env\n\n"
-               "  Comment mining (coming soon) will fall back to a simple keyword filter:\n"
+               "  Comment mining will fall back to a simple keyword filter:\n"
                "  noisier leads, fewer comments read, and more of your Claude usage.\n"
                "  A normal month on TypeSafe costs well under $5; check https://typesafe.ai\n"
                "  for current free credits, then put TYPESAFE_API=your-key in .env\n")
@@ -85,6 +87,14 @@ def check_env(no_typesafe):
         print(message + "\n  Continuing without it (--no-typesafe).\n" + f"{bar}\n")
         return
     sys.exit(message + "\n  To run without it anyway: python3 start.py --no-typesafe\n" + bar)
+
+
+def check_typesafe_packages():
+    """The TypeSafe filter needs a few Python packages; only checked when a key is set."""
+    import importlib.util
+    missing = [m for m in ("typesafe_sdk", "aiolimiter", "dotenv", "tqdm") if importlib.util.find_spec(m) is None]
+    name = "Python packages for TypeSafe" + (f" (missing: {', '.join(missing)})" if missing else "")
+    return report(not missing, name, "python3 -m pip install -r requirements.txt")
 
 
 def port_free(port):
@@ -119,7 +129,8 @@ def choose_port():
 
 
 def old_processes():
-    """This folder's web server, job worker and agent claude process, left over from an earlier run.
+    """This folder's web server, workers, agent, and mining processes (pipeline, children, yt-dlp, filters),
+    left over from an earlier run.
 
     Found through /proc (Linux, including WSL): processes whose working directory is this folder (or inside it) and
     whose command is one of ours. Returns None where /proc isn't available."""
@@ -138,8 +149,11 @@ def old_processes():
         except OSError:
             continue  # gone already, or not ours to inspect
         name = Path(args[0]).name
-        ours = ((name.startswith("php") and ("-S" in args or "scripts/job_worker.php" in args))
-                or (name == "claude" and "--input-format" in args))
+        script = any(a.startswith("scripts/") or "/scripts/" in a for a in args)  # workers and the mining pipeline
+        ours = ((name.startswith("php") and ("-S" in args or script))
+                or (name == "claude" and "-p" in args)          # the agent and mining children
+                or (name.startswith("python") and any("mining/" in a for a in args))
+                or any(Path(a).name == "yt-dlp" for a in args[:2]))  # also run as "python3 …/yt-dlp"
         if ours:
             found.append((int(d.name), " ".join(a for a in args if a)[:120]))
     return found
@@ -151,7 +165,7 @@ def reset():
     doomed = [ROOT / p for p in RESET_PATHS if (ROOT / p).exists()]
     bar = "!" * 72
     print(f"\n{bar}\n  RESET: THIS PERMANENTLY DELETES ALL YOUR noize-buffet DATA\n{bar}\n")
-    print("  Deletes (your queue, ratings, notes, chat history, brief, taste notes, logs):")
+    print("  Deletes (your queue, ratings, notes, chat history, brief, taste notes, mined comments and leads, logs):")
     for path in doomed:
         print(f"    - {path.relative_to(ROOT)}{'/' if path.is_dir() else ''}")
     if not doomed:
@@ -203,12 +217,12 @@ def pipe_output(proc, prefix):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Start the noize-buffet web server and agent worker.")
+    parser = argparse.ArgumentParser(description="Start the noize-buffet web server, agent worker and mining worker.")
     parser.add_argument("--no-typesafe", action="store_true",
                         help="run without a TypeSafe API key (comment mining falls back to a keyword filter)")
     parser.add_argument("--reset", action="store_true",
                         help="stop this folder's old servers and DELETE all your data (queue, ratings, chat, "
-                             "brief.md, taste.md), after confirming; then start fresh")
+                             "brief.md, taste.md, mined comments), after confirming; then start fresh")
     args = parser.parse_args()
     if args.reset:
         reset()
@@ -223,6 +237,7 @@ def main():
     procs = {
         "[web]  ": subprocess.Popen(["php", "-S", f"localhost:{port}", "-t", "player"], **popen),
         "[agent]": subprocess.Popen(["php", "scripts/job_worker.php"], **popen),
+        "[mine] ": subprocess.Popen(["php", "scripts/mine_worker.php"], **popen),
     }
     for prefix, proc in procs.items():
         threading.Thread(target=pipe_output, args=(proc, prefix), daemon=True).start()
@@ -232,7 +247,7 @@ def main():
         print("\nStopping...", flush=True)
         for proc in procs.values():
             try:
-                os.killpg(proc.pid, signal.SIGTERM)  # the whole group: server workers and any running agent
+                os.killpg(proc.pid, signal.SIGTERM)  # the whole group: server workers, agent and mining
             except ProcessLookupError:
                 pass
         for proc in procs.values():

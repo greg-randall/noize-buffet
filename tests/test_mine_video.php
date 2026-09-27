@@ -64,4 +64,13 @@ putenv('NB_FAKE_YTDLP_FAIL');
 $r = $row('V0000000002');
 check($code === 1 && $r['status'] === 'failed' && str_contains((string)$r['error'], 'Sign in to confirm your age'), "failed, with yt-dlp's error");
 
+echo "the worker\n";
+nb_add_batch($pdo, [['video_id' => 'V0000000003', 'title' => 'T3', 'artist' => 'A3', 'bucket' => 'user'],
+    ['video_id' => 'V0000000004', 'title' => 'T4', 'artist' => 'A4', 'bucket' => 'user']], 'b3', null);
+$p = proc_open([PHP_BINARY, __DIR__ . '/../scripts/mine_worker.php', '--once'], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+$out = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
+$code = proc_close($p);
+check($code === 0 && $row('V0000000003')['status'] === 'done' && $row('V0000000004')['status'] === 'done', 'the worker mines every queued video, then exits with --once');
+check(str_contains($out, 'mining worker started'), 'the worker says it started');
+
 finish();
