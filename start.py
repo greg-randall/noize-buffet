@@ -9,6 +9,7 @@ Usage: python3 start.py                     (port 8000, or a random free one fro
 Ctrl+C stops them all.
 """
 import argparse
+import json
 import os
 import random
 import re
@@ -54,6 +55,7 @@ INSTALL = {
     "pip": {"apt": "sudo apt install python3-pip", "brew": "brew install python"},
     "packages": {"any": "python3 -m pip install -r requirements.txt"},
     "claude": {"any": "install Claude Code from https://claude.com/claude-code, then run `claude` once to log in"},
+    "login": {"any": "claude auth login"},
 }
 DESCRIBE = {  # for systems with neither apt nor brew
     "php": "PHP 8.1 or newer", "pdo_sqlite": "PHP's SQLite (pdo_sqlite) extension", "intl": "PHP's intl extension",
@@ -115,6 +117,15 @@ def check_requirements(need_typesafe=True):
     r = run(["claude", "--version"])
     version = r.stdout.strip() if r and r.returncode == 0 else ""
     need(bool(version), f"Claude Code {version}".strip(), "claude")
+    if version:
+        # {"loggedIn": true, ...}; an older Claude Code without `auth status` isn't blocked, just not checked.
+        r = run(["claude", "auth", "status"])
+        try:
+            logged_in = json.loads(r.stdout).get("loggedIn") if r else None
+        except ValueError:
+            logged_in = None
+        if logged_in is not None:
+            need(bool(logged_in), "logged in to Claude Code", "login")
 
     if missing:
         print("\nTo install what's missing, run:\n")

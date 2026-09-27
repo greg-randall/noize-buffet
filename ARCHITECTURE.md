@@ -4,7 +4,7 @@ How noize-buffet is built, for anyone changing it or debugging it. [README.md](R
 
 ## Processes
 
-`start.py` checks the requirements (PHP 8.1+ with `pdo_sqlite`, `intl` and `mbstring`, GNU `timeout`, Python 3.10+ with pip, yt-dlp, the TypeSafe Python packages unless `--no-typesafe`, Claude Code, and the TypeSafe key); for anything missing it prints the install commands for apt or brew. Then it starts three processes in their own process group and prefixes their output:
+`start.py` checks the requirements (PHP 8.1+ with `pdo_sqlite`, `intl` and `mbstring`, GNU `timeout`, Python 3.10+ with pip, yt-dlp, the TypeSafe Python packages unless `--no-typesafe`, Claude Code and that it's logged in, and the TypeSafe key); for anything missing it prints the install commands for apt or brew. Then it starts three processes in their own process group and prefixes their output:
 
 | Prefix | Process | Job |
 |---|---|---|

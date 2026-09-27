@@ -6,7 +6,7 @@ You open a page in your web browser and describe the kind of music you're hoping
 
 It finds songs the way a friend with a record collection and a lot of free time might: it looks up the labels, producers and scenes behind the songs you like, reads music sites, and follows the trail. It also reads the YouTube comments under songs you love, where other listeners often say "if you like this, try…", and follows up the names that more than one person mentions.
 
-The picking is done by Claude, a machine-learning model made by Anthropic, through your own Claude account. Everything else, including the playlist, your ratings and its notes on your taste, stays in files on your computer.
+The picking is done by Claude, a machine-learning model, using your Claude subscription. Everything else, including the playlist, your ratings and its notes on your taste, stays in files on your computer.
 
 ![noize-buffet: the player, song details and ratings on the left with the playlist below, and the chat on the right](screenshot.webp)
 

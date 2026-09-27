@@ -29,6 +29,8 @@ def fake_run(have):
         if name == "php" and "php" in have:
             modules = "\n".join(m for m in ("pdo_sqlite", "intl", "mbstring") if m in have)
             return ran("8.3.6" if "-r" in cmd else modules)
+        if name == "claude" and "auth" in cmd and "claude" in have:
+            return ran('{"loggedIn": %s}' % ("true" if "login" in have else "false"))
         if name in have:
             return ran("1.0")
         return None
@@ -48,7 +50,7 @@ def check_with(have, manager, need_typesafe=True, modules_missing=False):
     return ok, out.getvalue()
 
 
-everything = {"php", "pdo_sqlite", "intl", "mbstring", "timeout", "pip", "yt-dlp", "claude"}
+everything = {"php", "pdo_sqlite", "intl", "mbstring", "timeout", "pip", "yt-dlp", "claude", "login"}
 print("everything installed")
 ok, out = check_with(everything, "apt")
 check(ok and "MISSING" not in out and "To install" not in out, "all OK, and no install list")
@@ -74,6 +76,11 @@ check("brew install coreutils" in plan and "gnubin" in plan, "coreutils, and how
 print("neither apt nor brew")
 ok, out = check_with({"pip", "yt-dlp", "claude"}, None)
 check("install PHP 8.1 or newer" in out and "install GNU coreutils" in out, "plain descriptions instead of commands")
+
+print("Claude Code installed but not logged in")
+ok, out = check_with(everything - {"login"}, "apt")
+check(not ok and "MISSING  logged in to Claude Code" in out and "    claude auth login" in out,
+      "reported, with claude auth login to fix it")
 
 print("--no-typesafe")
 ok, out = check_with(everything, "apt", need_typesafe=False, modules_missing=True)
