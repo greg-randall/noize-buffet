@@ -43,27 +43,11 @@ Open the address it prints (usually http://localhost:8000). It asks you a few qu
 
 ## How it works
 
-```mermaid
-flowchart LR
-    you(("You")) -->|"listen, rate, chat"| page["Web page"]
-    page -->|"saves ratings, queues messages"| db[("Database")]
-    worker["Job worker"] -->|"takes the next message"| db
-    worker --> agent["Claude, researching and picking songs"]
-    agent -->|"adds songs, reads feedback"| db
-    agent -->|"notes on your taste"| files["brief.md, taste.md"]
-    agent -->|"searches"| yt[("YouTube")]
-    agent -->|"reads"| web[("Bandcamp, Last.fm, Discogs, ...")]
-    miner["Comment miner"] -->|"takes the next liked song"| db
-    miner -->|"downloads comments"| yt
-    miner -->|"names other listeners mention"| leads["Leads"]
-    agent -->|"reads"| leads
-```
+`python3 start.py` runs three programs side by side. They don't talk to each other directly; each reads and writes one shared database file on your computer.
 
-`python3 start.py` runs three programs side by side, each doing one job:
-
-- **The web page**, where you listen, rate and chat. Everything you do there is saved to a small database file on your computer.
-- **The job worker**, which hands your chat messages, one at a time, to Claude. Claude runs in the background without a window of its own, and follows a rulebook in [`CLAUDE.md`](CLAUDE.md).
-- **The comment miner**, which reads the YouTube comments under songs you love.
+- **The web page** is where you listen, rate and chat. Your ratings and messages go into the database.
+- **The job worker** takes your messages from the database, one at a time, and hands them to Claude. Claude researches, adds songs to the database, and writes its reply back for the page to show. It runs in the background without a window of its own, and follows a rulebook in [`CLAUDE.md`](CLAUDE.md).
+- **The comment miner** watches the database for songs you rate top or yes (or named in the interview), reads their YouTube comments, and saves the artists other listeners mention, for Claude to use.
 
 ### Picking songs
 
