@@ -1,6 +1,6 @@
 # noize-buffet
 
-A music suggestion queue that an AI agent fills with new songs for your taste, running entirely on your own machine.
+A music suggestion queue that an AI agent fills with new songs for your taste. The web page, the database and the agent's notes stay on your machine; the agent itself is Claude, run through your Claude Code account.
 
 You chat with an AI agent in a local web page. It asks what you're after, then adds a batch of YouTube songs to a queue, and another whenever the queue runs low or you ask for more. You listen in the embedded player. It records how far you got, your rating, your notes and whether a song was new to you, and the agent uses all of that when it picks the next batch.
 
@@ -11,7 +11,7 @@ You chat with an AI agent in a local web page. It asks what you're after, then a
 - [Claude Code](https://claude.com/claude-code), logged in with your own account (it runs the agent)
 - PHP 8.1+ with `pdo_sqlite`
 - Python 3 and [yt-dlp](https://github.com/yt-dlp/yt-dlp)
-- A TypeSafe API key in `.env` (`start.py` creates `.env` from `.env.example` for you), and its Python packages: `python3 -m pip install -r requirements.txt`. Comment mining uses it to pick out comments that name music. `start.py` stops if the key is missing; to run without one, use `python3 start.py --no-typesafe` (mining then uses a keyword filter that finds only about half of the comments naming other artists).
+- A [TypeSafe](https://typesafe.ai) API key in `.env` (`start.py` creates `.env` from `.env.example` for you), and the Python packages: `python3 -m pip install -r requirements.txt`. TypeSafe is a paid service that scores yes/no questions about text; comment mining uses it to find the comments that name music. `start.py` stops if the key is missing. To run without one, use `python3 start.py --no-typesafe`; mining then uses a keyword filter instead, which found only about half as many of the useful comments in testing.
 
 ## Start
 
@@ -35,7 +35,7 @@ flowchart LR
     agent -->|"web search and fetch"| web[("Bandcamp, Last.fm, Discogs, ...")]
     miner["Mining worker (scripts/mine_worker.php)"] -->|"takes the next liked song"| db
     miner -->|"top comments, via yt-dlp"| yt
-    miner -->|"one Haiku per chunk, confined to its video's folder"| leads["leads table"]
+    miner -->|"Haiku, 150 comments at a time, confined to the video's folder"| leads["leads table"]
     agent -->|"bin/nb.php leads"| leads
 ```
 
@@ -46,9 +46,19 @@ flowchart LR
 3. The page plays the queue. For each song it records how far you got, your rating (top, yes, good, ok, meh, no), whether it was new to you, and whether it's good but not what you're looking for ("off-brief").
 4. You tell the agent what you think of the song that's playing ("love the drums", "the vocals are generic"). It saves your comment as a note on that song, fills in the rating and toggles your comment implies (you can change them), and updates `taste.md`. You can also paste a song you found, ask for more songs, or ask it to stop suggesting an artist.
 5. When only `refill_when_left` unplayed songs are left (5 by default), the worker asks the agent for the next batch, so the queue doesn't run out. You can also ask for more songs in the chat at any time. For each new batch, the agent reads your ratings, notes and chat since the last one, and reuses the artists, labels and scenes it has already found.
-6. Songs you rate top or yes, and songs you name, get their YouTube comments mined in the background. yt-dlp downloads up to 3,000 top comments, TypeSafe picks out the ones that seem to name music (without a key, a keyword filter finds only about half of them). It skips comments that only name the video's own artist and spam, and quarantines any comment that looks like instructions to an AI: those are never sent to Claude, and the panel counts them. A small Haiku agent per 150 comments then lists the artists and songs the rest name. Each Haiku agent can only read and write inside that video's folder under `comments/`; if one changes a file it must not touch, the video fails and nothing it wrote is used. Only videos that finished mining become leads, and a video that failed is tried again a day later. Names mentioned by 2 or more different people, or under 2 or more of your liked songs, become confirmed leads; a single person's mention is a hint. The agent reads the comments behind a lead and checks it against your brief before using it. The "Comment mining" section under the playlist shows each video's progress.
+6. Songs you rate top or yes, and songs you name, get their YouTube comments mined in the background for other artists people mention (below).
 
 While the agent works, the chat shows what it's doing ("Searching YouTube (12 songs)…", "Reading bandcamp.com…").
+
+### Comment mining
+
+People often name other artists under a song they like ("if you like this, try Burial"). For each song you rate top or yes, or name yourself, a third process downloads up to 3,000 of the video's top comments with yt-dlp and asks TypeSafe five questions about each one: does it name a song, an artist, an artist other than the video's own, is it spam, and does it try to give instructions to an AI. Comments that name only the video's own artist, and spam, are skipped. Comments that look like instructions to an AI are set aside in `quarantined.jsonl` and never sent to Claude.
+
+The rest go to Haiku, Claude's smallest model, which lists the artists and songs each comment names, 150 comments per run. Each Haiku run can read and write only inside that video's folder under `comments/`, and can't read `.env`. If one changes a file it wasn't asked to, the video fails and nothing it wrote is used.
+
+The names from every finished video are merged into leads. A name mentioned by 2 or more different people, or under 2 or more of your liked songs, is a confirmed lead; one person's mention is a hint. The video's own artist is never a lead under its own video. The agent reads the comments behind a lead and checks it against your brief before using it; the comments come from strangers, so its rulebook tells it to treat them as information, never as instructions. A video that failed is tried again a day later.
+
+The "Comment mining" section under the playlist shows each video's progress, counts, and what was skipped or set aside.
 
 ### Memory
 
@@ -56,19 +66,21 @@ The agent's conversation restarts after `session_rotate_turns` messages, after a
 
 ### Limits on the agent
 
-The agent can read and edit files in this folder, and anything outside it is refused. Its only shell commands are `php bin/nb.php …` (the database) and `python3 scripts/yt_search.py …`. Anything else is blocked, and blocked attempts show up in the chat. It ignores your own Claude Code setup (your `CLAUDE.md` files, hooks, memory and skills), so it behaves the same for everyone. It can never read or change `.env` (your TypeSafe key), whatever it's told: YouTube comments come from strangers, and the agent reads them. The web server only answers this page: other websites open in the same browser, and host names other than `localhost`, are refused.
+The agent can read and edit files in this folder, and anything outside it is refused. Its only shell commands are `php bin/nb.php …` (the database) and `python3 scripts/yt_search.py …`. Anything else is blocked, and blocked attempts show up in the chat. It ignores your own Claude Code setup (your `CLAUDE.md` files, hooks, memory and skills), so it behaves the same for everyone. A settings rule stops it reading or changing `.env`, which holds your TypeSafe key. The web server answers only this page; requests from other websites open in the same browser are refused.
 
 ### Time and usage
 
-On one measured run, chat replies took about 8 seconds and a first batch with web research took about 4 minutes. The agent runs on whatever account Claude Code is logged in with. A Claude subscription has no per-job charge, but jobs count toward your plan's usage limits, which you share with your own Claude Code use; that researched batch used about as much as 20 chat replies. With an API key, you pay per job. For each job, the worker terminal prints what it would have cost at API prices, as a measure of how heavy it was: about $0.05 per chat reply and $1 for that batch. Comment mining's Haiku agents also count toward your usage: one measured video (3,000 comments, 128 sent to Haiku) took about 7 minutes and $0.12 at API prices. If your usage runs out, the chat says so, and until the reset time Claude gives, mining starts no new videos (the one it was on goes back in the queue) and automatic refills wait; the agent's conversation is kept. The only other paid service is TypeSafe, at about $0.03 per 1,000 comments (about $0.09 for that video).
+On one measured run, chat replies took about 8 seconds and a first batch with web research took about 4 minutes. The agent runs on whatever account Claude Code is logged in with. A Claude subscription has no per-job charge, but jobs count toward your plan's usage limits, which you share with your own Claude Code use; that researched batch used about as much as 20 chat replies. With an API key, you pay per job. For each job, the worker terminal prints what it would have cost at API prices, as a measure of how heavy it was: about $0.05 per chat reply and $1 for that batch. Comment mining counts toward your usage too: one measured video (3,000 comments, 128 sent to Haiku) took about 7 minutes and $0.12 at API prices. TypeSafe, the only other paid service, cost about $0.09 for that video (about $0.03 per 1,000 comments).
+
+If your usage runs out, the chat says so. Until the reset time in Claude's message, mining starts no new videos (the one in progress goes back in the queue) and automatic refills wait. The agent's conversation is kept.
 
 ## Where things live
 
 - `brief.md`, `taste.md`: what you're after and what the agent has learned. You can edit both; the agent treats your edits as things you said.
 - `data/music.sqlite`: your queue, listening history, notes and chat (never committed)
-- `config.json`: `batch_size`; `mix` (share of close, lead and wildcard songs); `parent_model` (the Claude model the agent uses); `memory_picks` (most songs per batch the agent may suggest from its own memory rather than research); `refill_when_left` (unplayed songs left when a new batch is started automatically; 0 turns it off); `session_rotate_turns`; `job_timeout_s`; the `mining_*` settings (videos at once, comment cap, chunk size, and the model, time limit and budget for the Haiku agents); `typesafe_*_threshold` (song, artist, another artist than the video's own, instructions to an AI, spam); `mining_child_permission_mode` (`""` or `"dontAsk"`, whichever `check_confinement.php` passes with)
-- `comments/<video_id>/`: one mined video: its comments, the flagged ones, the chunks, each Haiku agent's output, `mine.log`, `children.jsonl` (each agent's time, cost and any blocked tools), `coverage.json` and `quarantined.jsonl` (comments that looked like instructions to an AI, with their text) (never committed)
-- `mining/`: the mining scripts and `child_CLAUDE.md`, the instructions each Haiku agent gets; `mining/typesafe_experiment.py` measures the TypeSafe questions on 564 saved real comments (needs the key, about a cent)
+- `config.json`: `batch_size`; `mix` (share of close, lead and wildcard songs); `parent_model` (the Claude model the agent uses); `memory_picks` (most songs per batch the agent may suggest from its own memory rather than research); `refill_when_left` (unplayed songs left when a new batch is started automatically; 0 turns it off); `session_rotate_turns`; `job_timeout_s`; the `mining_*` settings (videos at once, comment cap, chunk size, and the model, time limit and budget for each Haiku run); `typesafe_*_threshold` (how sure TypeSafe must be, per question); `mining_child_permission_mode` (`""`, the default, or `"dontAsk"`; both passed the confinement check)
+- `comments/<video_id>/`: one mined video: its comments, the flagged ones, the chunks, each Haiku run's output, `mine.log`, `children.jsonl` (each Haiku run's time, cost and any blocked tools), `coverage.json` and `quarantined.jsonl` (comments set aside as instructions to an AI, with their text); never committed
+- `mining/`: the mining scripts, and `child_CLAUDE.md`, the instructions each Haiku run gets
 - `requirements.txt`: the Python packages (yt-dlp, and the TypeSafe filter's)
 - `CLAUDE.md`: the agent's rulebook
 - `player/`: the web page; `scripts/job_worker.php`: the worker; `scripts/mine_worker.php` and `scripts/mine_video.php`: comment mining; `bin/nb.php`: the agent's database commands; `scripts/yt_search.py`: YouTube search; `lib/`: shared PHP
@@ -77,7 +89,10 @@ On one measured run, chat replies took about 8 seconds and a first batch with we
 
     bash tests/run.sh
 
-The tests use stand-ins for `claude`, `yt-dlp` and TypeSafe, so they cost nothing. Two checks use the real ones: `php scripts/check_confinement.php` runs about five cheap Haiku agents to check they can't write or read outside their folder, read `.env`, or pick up other instruction files (it says `INCONCLUSIVE` if you're out of usage), and `python3 mining/typesafe_experiment.py` (above).
+The tests use stand-ins for `claude`, `yt-dlp` and TypeSafe, so they cost nothing. Two checks use the real services:
+
+- `php scripts/check_confinement.php` runs about five Haiku runs (about $0.05) that try to write or read outside their folder, read a protected secret, and pick up other instruction files. It prints `PASS` when every attempt is refused, and `INCONCLUSIVE` if you're out of usage.
+- `python3 mining/typesafe_experiment.py` asks TypeSafe its five questions about 564 saved real comments and ten made-up injection attempts, and reports what each threshold would skip (about $0.02).
 
 ## When something goes wrong
 
@@ -86,8 +101,8 @@ The tests use stand-ins for `claude`, `yt-dlp` and TypeSafe, so they cost nothin
 - `data/nb.log`: every database command the agent ran, with its exact input and output (one JSON object per line).
 - `data/parent-stderr.log`: anything `claude` printed to stderr.
 - `data/api-errors.log`: server-side errors from the web UI, with stack traces.
-- The worker terminal's `[mine]` lines show each video's steps. For one video, see `comments/<video_id>/mine.log` (everything yt-dlp, the filters and the Haiku agents printed), `children.jsonl` and `coverage.json`. The panel's Notes column says what the filter skipped or quarantined.
-- If every Haiku agent fails at start-up and `mine.log` mentions MCP or a managed policy: a managed `managed-mcp.json` policy makes `--strict-mcp-config` exit at once. Remove that flag from `nb_child_command()` in `lib/mining.php`.
+- The worker terminal's `[mine]` lines show each video's steps. For one video, see `comments/<video_id>/mine.log` (everything yt-dlp, the filters and the Haiku runs printed), `children.jsonl` and `coverage.json`.
+- If every Haiku run fails at start-up and `mine.log` mentions MCP or a managed policy: a managed `managed-mcp.json` policy makes `--strict-mcp-config` exit at once. Remove that flag from `nb_child_command()` in `lib/mining.php`.
 
 ## License
 
