@@ -53,8 +53,13 @@ def check_requirements():
     ok &= report(len(parts) == 2 and tuple(parts) >= (8, 1), f"PHP 8.1+ (found {version or 'none'})",
                  "install PHP 8.1 or newer")
     r = run(["php", "-m"])
-    ok &= report(bool(r and "pdo_sqlite" in r.stdout), "PHP pdo_sqlite extension",
-                 "install your system's PHP SQLite package (e.g. php-sqlite3)")
+    modules = r.stdout.split() if r else []
+    for module, package in (("pdo_sqlite", "php-sqlite3"), ("intl", "php-intl"), ("mbstring", "php-mbstring")):
+        ok &= report(module in modules, f"PHP {module} extension",
+                     f"install your system's PHP package for it (e.g. sudo apt install {package})")
+    # Comment mining puts a time limit on every step with GNU timeout (standard on Linux and WSL, not on macOS).
+    ok &= report(shutil.which("timeout") is not None, "timeout command (GNU coreutils)",
+                 "on macOS: brew install coreutils, then put its gnubin folder first on your PATH")
     report(True, f"Python {sys.version.split()[0]}")
     r = run(["claude", "--version"])
     version = r.stdout.strip() if r and r.returncode == 0 else ""
