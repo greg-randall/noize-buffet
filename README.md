@@ -6,11 +6,11 @@ You open a page in your web browser and describe the kind of music you're hoping
 
 It finds songs the way a friend with a record collection and a lot of free time might: it looks up the labels, producers and scenes behind the songs you like, reads music sites, and follows the trail. It also reads the YouTube comments under songs you love, where other listeners often say "if you like this, try…", and follows up the names that more than one person mentions.
 
-The picking is done by Claude, a machine-learning model, using your Claude subscription. Everything else, including the playlist, your ratings and its notes on your taste, stays in files on your computer.
+The picking is done by Claude, a machine-learning model.
 
 ![noize-buffet: the player, song details and ratings on the left with the playlist below, and the chat on the right](screenshot.webp)
 
-**Cost.** It needs a Claude subscription (or an Anthropic API key). A subscription has no extra charge, but noize-buffet uses some of your plan's usage: a new batch of songs takes about as much as 20 chat replies. Reading a song's comments uses a little more, and a paid service called TypeSafe, which sorts the comments, costs about 9 cents per song you love (for a song with 3,000 comments).
+**Cost.** It runs on your Claude subscription, so there's nothing extra to pay Anthropic; it counts toward your plan's usage limits like any other Claude use (a new batch of songs uses about as much as 20 chat messages). The one extra cost is TypeSafe, a service that sorts YouTube comments: up to about 9 cents for each song you love.
 
 ## Quickstart
 
