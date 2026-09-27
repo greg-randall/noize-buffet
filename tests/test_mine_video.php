@@ -73,4 +73,85 @@ $code = proc_close($p);
 check($code === 0 && $row('V0000000003')['status'] === 'done' && $row('V0000000004')['status'] === 'done', 'the worker mines every queued video, then exits with --once');
 check(str_contains($out, 'mining worker started'), 'the worker says it started');
 
+echo "the TypeSafe path (tests/fake_python.py stands in for python3 and fakes the TypeSafe filter)\n";
+$keyEnv = tmp_dir() . '/mine_key.env';
+file_put_contents($keyEnv, "TYPESAFE_API=fake-key\n");
+$pyLog = tmp_dir() . '/fake_py_calls.jsonl';
+$statusLog = tmp_dir() . '/fake_status.jsonl';
+$ids = tmp_dir() . '/fake_ts_ids.txt';
+file_put_contents($ids, "a1\na2\na3\n"); // TypeSafe flags the three comments that name someone, not a4's plain praise
+$probing = function (string $name, string $label, string $script): string { // records the status, then runs the fake
+    $path = tmp_dir() . "/$name";
+    file_put_contents($path, "#!/usr/bin/env bash\npython3 " . escapeshellarg(__DIR__ . '/fake_python.py') . " --probe $label\n"
+        . 'exec ' . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . "/$script") . " \"\$@\"\n");
+    chmod($path, 0755);
+    return $path;
+};
+$pyBin = tmp_dir() . '/fake_python';
+file_put_contents($pyBin, "#!/usr/bin/env bash\nexec python3 " . escapeshellarg(__DIR__ . '/fake_python.py') . " \"\$@\"\n");
+chmod($pyBin, 0755);
+foreach (['NB_ENV_FILE' => $keyEnv, 'NB_PYTHON_BIN' => $pyBin, 'NB_FAKE_PY_LOG' => $pyLog, 'NB_FAKE_STATUS_LOG' => $statusLog,
+    'NB_FAKE_TS_FLAGGED_IDS' => $ids, 'NB_YTDLP_BIN' => $probing('probe_ytdlp', 'yt-dlp', 'fake_ytdlp.php'),
+    'NB_CLAUDE_BIN' => $probing('probe_child', 'claude', 'fake_mining_child.php')] as $k => $v) {
+    putenv("$k=$v");
+}
+$fakeTs = ['NB_FAKE_TS_FAILED', 'NB_FAKE_TS_EXIT', 'NB_FAKE_TS_NOFILE', 'NB_FAKE_TS_OMIT_FAILED', 'NB_FAKE_TS_MESSAGE'];
+/** Mine $vid with the fake TypeSafe switches in $switches; returns [exit code, output, mining row]. */
+$mineTs = function (string $vid, array $switches = []) use ($pdo, $mine, $row, $fakeTs, $pyLog, $statusLog): array {
+    @unlink($pyLog);
+    @unlink($statusLog);
+    foreach ($fakeTs as $k) {
+        putenv(isset($switches[$k]) ? "$k={$switches[$k]}" : $k);
+    }
+    nb_mining_enqueue($pdo, $vid);
+    [$code, $out] = $mine($vid);
+    foreach ($fakeTs as $k) {
+        putenv($k);
+    }
+    return [$code, $out, $row($vid)];
+};
+$lines = fn(string $file) => array_map(fn($l) => json_decode($l, true), is_file($file) ? file($file, FILE_IGNORE_NEW_LINES) : []);
+
+[$code, $out, $r] = $mineTs('V0000000005');
+check($code === 0 && $r['status'] === 'done' && $r['error'] === null, 'TypeSafe: done, no error' . ($code ? " (exit $code: $out)" : ''));
+check($r['filter'] === 'typesafe' && !str_contains($out, 'no TypeSafe key'), 'TypeSafe: the typesafe filter, and no keyword warning');
+check((int)$r['comments'] === 4 && (int)$r['flagged'] === 3 && (int)$r['covered'] === 3 && (int)$r['mentions'] === 3,
+    'TypeSafe: 4 comments, 3 flagged, 3 covered, 3 mentions');
+$ts = array_values(array_filter($lines($pyLog), fn($c) => $c['script'] === 'find_music_mentions.py'))[0]['args'] ?? [];
+$arg = fn(string $flag) => $ts[array_search($flag, $ts, true) + 1] ?? null;
+check(in_array('--input', $ts, true) && $arg('--env') === $keyEnv && $arg('--song-threshold') === '0.8'
+    && $arg('--artist-threshold') === '0.8', 'TypeSafe: called with the info file, the .env path and both thresholds');
+check(array_column($lines($pyLog), 'script') === ['find_music_mentions.py', 'prepare.py', 'merge_leads.py'],
+    'TypeSafe: the pipeline runs the filter, prepare and merge through NB_PYTHON_BIN, in that order');
+$seen = [];
+foreach ($lines($statusLog) as $p) {
+    $seen[$p['tool']][] = $p['status']['V0000000005'] ?? '?';
+}
+check(array_unique($seen['yt-dlp'] ?? []) === ['downloading'], 'status is downloading while yt-dlp runs');
+check(array_unique($seen['find_music_mentions.py'] ?? []) === ['filtering'], 'status is filtering while TypeSafe runs');
+check(array_unique($seen['prepare.py'] ?? []) === ['filtering'], 'and still filtering while prepare.py numbers the comments');
+check(array_values(array_unique($seen['claude'] ?? [])) === ['extracting'] && count($seen['claude']) === 3,
+    'status is extracting for all three children');
+check(array_unique($seen['merge_leads.py'] ?? []) === ['extracting'], 'and while the leads are merged; done only after');
+
+[$code, $out, $r] = $mineTs('V0000000006', ['NB_FAKE_TS_FAILED' => '5', 'NB_FAKE_TS_EXIT' => '1']);
+check($code === 0 && $r['status'] === 'done' && (int)$r['flagged'] === 3, 'some TypeSafe calls failed: the video still finishes with what did work');
+check(str_contains((string)$r['error'], '5 comments failed at TypeSafe'), 'and the failed calls are recorded as a problem');
+
+[$code, $out, $r] = $mineTs('V0000000007', ['NB_FAKE_TS_EXIT' => '1']);
+check($code === 1 && $r['status'] === 'failed', 'TypeSafe failed with no failed calls counted (a bad key): the video fails');
+check(str_contains((string)$r['error'], 'the API key was rejected (HTTP 401)'),
+    "and the error is TypeSafe's own last line, not the runner's exit line" . " (got: {$r['error']})");
+
+[$code, $out, $r] = $mineTs('V0000000008', ['NB_FAKE_TS_NOFILE' => '1']);
+check($code === 1 && $r['status'] === 'failed' && str_starts_with((string)$r['error'], 'typesafe filter failed'),
+    'TypeSafe wrote no flagged file: the video fails, naming the filter');
+
+[$code, $out, $r] = $mineTs('V0000000009', ['NB_FAKE_TS_OMIT_FAILED' => '1']);
+check($code === 0 && $r['status'] === 'done' && $r['error'] === null, 'a flagged file without a "failed" count is read as none failed');
+
+foreach (['NB_PYTHON_BIN', 'NB_FAKE_PY_LOG', 'NB_FAKE_STATUS_LOG', 'NB_FAKE_TS_FLAGGED_IDS'] as $k) {
+    putenv($k);
+}
+
 finish();

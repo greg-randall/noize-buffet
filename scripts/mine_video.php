@@ -28,7 +28,8 @@ $started = microtime(true);
 $say = function (string $msg) use ($vid, $started): void {
     printf("[%s] %s: %s (%.0fs)\n", nb_now(), $vid, $msg, microtime(true) - $started);
 };
-$py = fn(string $script, array $args): array => array_merge(['python3', nb_root() . "/mining/$script"], $args);
+// NB_PYTHON_BIN lets tests stand in for python3 (tests/fake_python.py fakes the TypeSafe filter).
+$py = fn(string $script, array $args): array => array_merge([getenv('NB_PYTHON_BIN') ?: 'python3', nb_root() . "/mining/$script"], $args);
 // Time limits, so a hung subprocess can't hold a worker forever (children have mining_child_timeout_s).
 const NB_YTDLP_TIMEOUT_S = 1800.0;
 const NB_FILTER_TIMEOUT_S = 3600.0;
@@ -38,9 +39,13 @@ $fail = function (string $error) use ($pdo, $vid, $say): never {
     $say("failed: $error");
     exit(1);
 };
-/** The part of the log written since $offset: the last line mentioning ERROR, else its last non-empty line. */
+/**
+ * The part of the log written since $offset: the last line mentioning ERROR, else its last non-empty line.
+ * nb_run_logged's own "[time] $ command" and "[time] exit N after Ns" lines are skipped: they say nothing about why.
+ */
 $errorLine = function (int $offset) use ($log): string {
-    $lines = array_values(array_filter(array_map('trim', explode("\n", (string)file_get_contents($log, false, null, $offset)))));
+    $lines = array_values(array_filter(array_map('trim', explode("\n", (string)file_get_contents($log, false, null, $offset))),
+        fn($l) => $l !== '' && !preg_match('/^\[[^\]]+\] (\$ |exit \S+ after )/', $l)));
     $errors = array_values(array_filter($lines, fn($l) => str_contains($l, 'ERROR')));
     return $errors ? end($errors) : ($lines ? end($lines) : 'no output');
 };
