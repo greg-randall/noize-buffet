@@ -29,7 +29,11 @@ Open a new terminal and run `claude` once to log in with your Claude account. Th
     python3 -m pip install -r requirements.txt
     cp .env.example .env
 
-Get a [TypeSafe](https://typesafe.ai) key and put it in `.env` after `TYPESAFE_API=`. Then start it:
+Sign up at [TypeSafe](https://typesafe.ai) and copy your API key. The `cp` command above made a settings file called `.env` in the noize-buffet folder (the dot at the start of its name hides it from most file browsers). Open it in a text editor, for example with `nano .env`, and paste your key straight after the `=` on the `TYPESAFE_API=` line (no quotes needed):
+
+    TYPESAFE_API=your-key-here
+
+Save the file (in nano: Ctrl+O, Enter, then Ctrl+X to exit). The key stays on your computer; `.env` is never uploaded with the code. Then start noize-buffet:
 
     python3 start.py
 
