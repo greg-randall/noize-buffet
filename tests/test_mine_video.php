@@ -126,7 +126,7 @@ $ts = array_values(array_filter($lines($pyLog), fn($c) => $c['script'] === 'find
 $arg = fn(string $flag) => $ts[array_search($flag, $ts, true) + 1] ?? null;
 check(in_array('--input', $ts, true) && $arg('--env') === $keyEnv && $arg('--song-threshold') === '0.8'
     && $arg('--artist-threshold') === '0.8', 'TypeSafe: called with the info file, the .env path and both thresholds');
-check($arg('--other-artist-threshold') === '0.3' && $arg('--injection-threshold') === '0.5' && $arg('--spam-threshold') === '0.9',
+check($arg('--other-artist-threshold') === '0.3' && $arg('--injection-threshold') === '0.5' && $arg('--spam-threshold') === '0.9' && $arg('--min-chars') === '10',
     'and the other-artist, injection and spam thresholds from the config');
 check($r['notes'] === null, 'nothing skipped or quarantined: no notes');
 check(array_column($lines($pyLog), 'script') === ['find_music_mentions.py', 'prepare.py', 'coverage.py', 'coverage.py', 'merge_leads.py'],
@@ -155,10 +155,10 @@ check(str_contains((string)$r['error'], 'the API key was rejected (HTTP 401)'),
 check($code === 1 && $r['status'] === 'failed' && str_starts_with((string)$r['error'], 'typesafe filter failed'),
     'TypeSafe wrote no flagged file: the video fails, naming the filter');
 
-[$code, $out, $r] = $mineTs('V0000000013', ['NB_FAKE_TS_COUNTS' => '{"quarantined": 2, "own_artist_skipped": 5, "spam_skipped": 1}']);
+[$code, $out, $r] = $mineTs('V0000000013', ['NB_FAKE_TS_COUNTS' => '{"quarantined": 2, "own_artist_skipped": 5, "spam_skipped": 1, "too_short_skipped": 40}']);
 check($code === 0 && $r['status'] === 'done' && str_contains((string)$r['notes'], '2 comments looked like instructions aimed at Claude')
     && str_contains((string)$r['notes'], 'quarantined.jsonl') && str_contains((string)$r['notes'], '5 only name the video')
-    && str_contains((string)$r['notes'], '1 spam'), "what the filter skipped or quarantined is in the row's notes");
+    && str_contains((string)$r['notes'], '1 spam') && str_contains((string)$r['notes'], '40 too short to name anything'), "what the filter skipped or quarantined is in the row's notes");
 check(str_contains($out, '2 comments looked like instructions aimed at Claude'), 'and in the output');
 
 [$code, $out, $r] = $mineTs('V0000000009', ['NB_FAKE_TS_OMIT_FAILED' => '1']);

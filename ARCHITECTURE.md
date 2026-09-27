@@ -83,7 +83,7 @@ Rating a song top or yes (`nb_save_listen()`), or adding it with bucket `user`, 
 
 ### TypeSafe questions
 
-`find_music_mentions.py` asks five yes/no questions per comment in one call; the state is the comment (reply @handles replaced by `@user`), the video title and the channel. The questions are fixed and the per-video facts are in the state, so uploader-written titles can't change the instructions.
+`find_music_mentions.py` asks five yes/no questions per comment in one call; the state is the comment (reply @handles replaced by `@user`), the video title and the channel. The questions are fixed and the per-video facts are in the state, so uploader-written titles can't change the instructions. Comments under `typesafe_min_comment_chars` (10) characters once @handles are removed, or with no letters at all, aren't asked; they're counted as `too_short_skipped` and shown in the mining notes. On the 564 real comments that skips 128 and loses no lead (the shortest real lead is "angel olsen?"); `tests/test_mining.py` checks it.
 
 | Question | Threshold (`config.json`) | Effect |
 |---|---|---|
@@ -142,6 +142,7 @@ Around each run, the runner:
 | `mining_child_max_budget_usd` | 1.0 | a child's spending cap |
 | `mining_child_permission_mode` | `""` | `""` or `"dontAsk"` |
 | `typesafe_*_threshold` | see above | TypeSafe cut-offs |
+| `typesafe_min_comment_chars` | 10 | shorter comments (@handles aside) and letterless ones aren't sent to TypeSafe; 0 sends everything with a letter |
 
 ## Files
 

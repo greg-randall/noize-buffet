@@ -25,6 +25,7 @@ const NB_CONFIG_DEFAULTS = [
     'typesafe_other_artist_threshold' => 0.3,
     'typesafe_injection_threshold' => 0.5, // quarantine comments that look like instructions aimed at Claude
     'typesafe_spam_threshold' => 0.9, // skip spam and self-promotion
+    'typesafe_min_comment_chars' => 10, // don't pay to ask about shorter comments (@handles aside) or letterless ones
 ];
 
 /** Defaults overlaid with config.json (if present). */

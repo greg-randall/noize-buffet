@@ -62,7 +62,7 @@ While Claude works, the chat shows what it's doing ("Searching YouTube (12 songs
 
 ### Reading the comments
 
-When you rate a song top or yes, or name it in the interview, the comment miner downloads up to 3,000 of its top YouTube comments. TypeSafe, a paid service that answers yes/no questions about text, picks out the comments that name another artist or song, and skips comments that only praise the video's own artist, spam, and anything that looks like an attempt to give instructions to a computer. A small, cheap Claude model called Haiku then reads the rest and lists every artist and song they name.
+When you rate a song top or yes, or name it in the interview, the comment miner downloads up to 3,000 of its top YouTube comments. Comments too short to name anything ("cool", "🔥🔥🔥") are dropped for free. TypeSafe, a paid service that answers yes/no questions about text, picks out the comments that name another artist or song, and skips comments that only praise the video's own artist, spam, and anything that looks like an attempt to give instructions to a computer. A small, cheap Claude model called Haiku then reads the rest and lists every artist and song they name.
 
 Names that 2 or more different people mention, or that come up under 2 or more of your songs, become **confirmed leads**; one person's mention is a **hint**. Claude reads the comments behind a lead and checks it against your goal before using it. The "Comment mining" section under the playlist shows each song's progress. A song with 3,000 comments takes about 7 minutes.
 

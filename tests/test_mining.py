@@ -475,6 +475,26 @@ else:
           "the AI-instruction comment is counted and kept, with its text, in quarantined.jsonl")
     check(out["own_artist_skipped"] == 1 and out["spam_skipped"] == 0, "the own-artist comment is counted as skipped")
 
+    print("find_music_mentions: comments too short to name anything aren't asked")
+
+    def short(text, n=fmm.DEFAULT_MIN_CHARS):
+        return fmm.too_short({"text": text}, n)
+    check(short("cool") and short("🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥") and short("3:45 3:45 3:45 !!!"),
+          "a short comment, and a long one with no letters, are too short")
+    check(short("@someone-with-a-long-handle nice") and short("\xa0@someone-long-handle\xa0 so good"),
+          "@handles don't count toward the length")
+    check(not short("angel olsen?") and not short("@someone Burial vibes") and not short("日本の音楽が好きです"),
+          "a real mention is kept (the shortest real lead was 'angel olsen?'), letters in any script count")
+    check(not short("cool", 0), "--min-chars 0 asks about everything with a letter")
+    real = [json.loads(x) for x in real_path.read_text(encoding="utf-8").splitlines()]
+    leads_lost = [c["text"] for c in real if c["haiku_mentions"] and short(c["text"])]
+    n_short = sum(short(c["text"]) for c in real)
+    check(not leads_lost and n_short > len(real) // 10,
+          f"on the real comments, {n_short} of {len(real)} are skipped and no lead is lost (lost: {leads_lost})")
+    counts = fmm.write_flagged(rows, q_dir / "music_mentions_flagged.json", T, 4, 0, 7)
+    check(json.loads((q_dir / "music_mentions_flagged.json").read_text(encoding="utf-8"))["too_short_skipped"] == 7,
+          "the too-short count is written to the flagged file")
+
     print("typesafe_experiment: the report, from made-up answers")
     import typesafe_experiment as tx  # noqa: E402
     fixture = tx.load_fixture()

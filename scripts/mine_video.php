@@ -127,7 +127,8 @@ try {
             '--artist-threshold', (string)$config['typesafe_artist_threshold'],
             '--other-artist-threshold', (string)$config['typesafe_other_artist_threshold'],
             '--injection-threshold', (string)$config['typesafe_injection_threshold'],
-            '--spam-threshold', (string)$config['typesafe_spam_threshold']]);
+            '--spam-threshold', (string)$config['typesafe_spam_threshold'],
+            '--min-chars', (string)$config['typesafe_min_comment_chars']]);
     } else {
         $filter = 'keyword';
         $say('WARNING: no TypeSafe key in .env, so using the keyword filter: it finds only about half of the comments that name other artists, and about half of what it flags names nothing');
@@ -158,6 +159,9 @@ try {
     }
     if (($n = (int)($filtered['own_artist_skipped'] ?? 0)) > 0) {
         $notes[] = "$n only name the video's own artist, skipped";
+    }
+    if (($n = (int)($filtered['too_short_skipped'] ?? 0)) > 0) {
+        $notes[] = "$n too short to name anything, skipped";
     }
     if (($n = (int)($filtered['spam_skipped'] ?? 0)) > 0) {
         $notes[] = "$n spam or self-promotion, skipped";

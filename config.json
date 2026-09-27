@@ -17,5 +17,6 @@
   "typesafe_artist_threshold": 0.8,
   "typesafe_other_artist_threshold": 0.3,
   "typesafe_injection_threshold": 0.5,
-  "typesafe_spam_threshold": 0.9
+  "typesafe_spam_threshold": 0.9,
+  "typesafe_min_comment_chars": 10
 }

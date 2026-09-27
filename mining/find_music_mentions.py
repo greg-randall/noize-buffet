@@ -14,6 +14,8 @@ music_mentions_flagged.json gets the comments worth sending to the extraction ch
 - a comment naming a song is flagged; one naming an artist is flagged only if it names someone other than the
   video's own artist (the other-artist threshold is low on purpose: a wrong skip loses a lead for good), and
   otherwise counted as "own artist only".
+Comments too short to name anything (under --min-chars characters once @handles are removed, 10 by default) or
+with no letters at all ("🔥🔥🔥", "3:45") are never sent to TypeSafe; they're counted as too short.
 
 Usage:
     python3 mining/find_music_mentions.py --input comments/ID/ID.info.json
@@ -53,6 +55,18 @@ RETRY = RetryPolicy(max_retries=6, backoff_max=30.0)
 
 # YouTube wraps reply mentions in non-breaking spaces: "\xa0@handle\xa0"
 REPLY_MENTION_RE = re.compile("\xa0@[^\xa0]+\xa0")
+# a reply can also start with a plain "@handle " typed by hand
+LEADING_HANDLE_RE = re.compile(r"^(?:\s*@\S+)+")
+LETTER_RE = re.compile(r"[^\W\d_]")
+# On 564 real comments, the shortest that named another artist was "angel olsen?" (12 characters); under 10 skipped
+# 23% of them and no leads.
+DEFAULT_MIN_CHARS = 10
+
+
+def too_short(comment: dict, min_chars: int) -> bool:
+    """True if a comment can't name anything: under min_chars characters without its @handles, or no letters."""
+    text = LEADING_HANDLE_RE.sub("", REPLY_MENTION_RE.sub(" ", comment["text"])).strip()
+    return len(text) < min_chars or not LETTER_RE.search(text)
 
 
 def make_state(comment: dict) -> dict:
@@ -277,7 +291,7 @@ def refresh_rows(rows: list[dict], comments: list[dict]) -> tuple[list[dict], in
     return refreshed, missing
 
 
-def write_flagged(rows, flagged_path, t, comments_total, failed) -> dict:
+def write_flagged(rows, flagged_path, t, comments_total, failed, too_short_skipped=0) -> dict:
     """Write the flagged file (and quarantined.jsonl beside it); returns the counts per classify() outcome."""
     flagged, quarantined = [], []
     counts = {"flag": 0, "quarantine": 0, "spam": 0, "own_artist": 0, "none": 0}
@@ -300,6 +314,7 @@ def write_flagged(rows, flagged_path, t, comments_total, failed) -> dict:
         "quarantined": counts["quarantine"],
         "spam_skipped": counts["spam"],
         "own_artist_skipped": counts["own_artist"],
+        "too_short_skipped": too_short_skipped,
         "flagged": flagged,
     }, indent=2, ensure_ascii=False), encoding="utf-8")
     return counts
@@ -326,6 +341,9 @@ def main():
                              "(default: %(default)s)")
     parser.add_argument("--spam-threshold", type=float, default=DEFAULT_THRESHOLDS["spam"],
                         help="skip spam or self-promotion at p >= this (default: %(default)s)")
+    parser.add_argument("--min-chars", type=int, default=DEFAULT_MIN_CHARS,
+                        help="don't ask about comments shorter than this, @handles aside, or with no letters "
+                             "(default: %(default)s; 0 asks about everything)")
     parser.add_argument("--debug", type=int, metavar="N",
                         help="ask only the first N comments, one at a time; nothing written to the JSONL/CSV, "
                              f"and flagged rows go to {RESULTS_FLAGGED_DEBUG} instead of {RESULTS_FLAGGED}")
@@ -341,8 +359,12 @@ def main():
     t = {"song": args.song_threshold, "artist": args.artist_threshold, "other_artist": args.other_artist_threshold,
          "instructs_ai": args.injection_threshold, "spam": args.spam_threshold}
     api_key = load_api_key(args.env)
-    comments = load_comments(input_path)
+    all_comments = load_comments(input_path)
+    comments = [c for c in all_comments if not too_short(c, args.min_chars)]
+    skipped_short = len(all_comments) - len(comments)
     print(f"input: {input_path}", file=sys.stderr)
+    print(f"{skipped_short:,} of {len(all_comments):,} comments too short to name anything "
+          f"(under {args.min_chars} characters or no letters), not asked", file=sys.stderr)
 
     failed = 0
     if args.debug:
@@ -367,13 +389,14 @@ def main():
     print(f"{label}: {tokens:,} input tokens, ${tokens * USD_PER_INPUT_TOKEN:.6f} "
           f"(${tokens * USD_PER_INPUT_TOKEN / max(len(rows), 1) * 1000:.4f} per 1,000 comments)", file=sys.stderr)
 
+    # comments are the ones worth asking, so rows for comments now too short are left out here too
     refreshed, missing = refresh_rows(rows, comments)
     if missing:
         print(f"{missing:,} rows in {jsonl} refer to comments no longer in {input_path}; "
               f"excluded from {flagged_path}", file=sys.stderr)
 
-    counts = write_flagged(refreshed, flagged_path, t, len(comments), failed)
-    print(f"{counts['flag']:,} of {len(refreshed):,} flagged -> {flagged_path}; skipped: "
+    counts = write_flagged(refreshed, flagged_path, t, len(all_comments), failed, skipped_short)
+    print(f"{counts['flag']:,} of {len(refreshed):,} flagged -> {flagged_path}; skipped: {skipped_short:,} too short, "
           f"{counts['own_artist']:,} name only the video's own artist, {counts['spam']:,} spam, "
           f"{counts['none']:,} name no music; {counts['quarantine']:,} quarantined as instructions aimed at Claude "
           f"(quarantined.jsonl)", file=sys.stderr)
