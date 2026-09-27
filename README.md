@@ -72,7 +72,7 @@ Claude's conversation starts over every 40 messages and after an error. What it 
 
 ### What Claude can and can't do
 
-It can read and change files in the noize-buffet folder, and nothing outside it. It can run two commands: one for the database and one for searching YouTube. It can't read `.env`, where your TypeSafe key is kept. The comments it reads are written by strangers, so its rulebook tells it to treat them as information, never as instructions. The Haiku readers are more tightly limited: each can read and write only inside one song's folder.
+It can read and change files in the noize-buffet folder, and nothing outside it. It can run three commands: one for the database, one for searching YouTube, and one for reading public Spotify playlists. It can also search the web and read web pages. It can't read `.env`, where your TypeSafe key is kept. The comments it reads are written by strangers, so its rulebook tells it to treat them as information, never as instructions. The Haiku readers are more tightly limited: each can read and write only inside one song's folder.
 
 ### Time and usage
 
