@@ -23,7 +23,7 @@ const NB_CONFIG_DEFAULTS = [
     // A comment naming an artist goes to the extraction child only if TypeSafe thinks it names someone other than
     // the video's own artist at this or more; low on purpose, since a wrong skip loses the lead for good.
     'typesafe_other_artist_threshold' => 0.3,
-    'typesafe_injection_threshold' => 0.5, // quarantine comments that look like instructions to an AI
+    'typesafe_injection_threshold' => 0.5, // quarantine comments that look like instructions aimed at Claude
     'typesafe_spam_threshold' => 0.9, // skip spam and self-promotion
 ];
 

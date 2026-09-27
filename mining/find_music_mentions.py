@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Ask TypeSafe five yes/no questions about every YouTube comment, in one call per comment:
 does it name a song; does it name a musical artist; does it name an artist other than the video's own;
-does it try to give instructions to an AI; is it spam or self-promotion.
+does it try to give instructions to Claude or another program; is it spam or self-promotion.
 
 Reads one yt-dlp .info.json (--input). TypeSafe sees the comment text, the video title and the video's channel
 (the title alone often lacks the artist, e.g. "Kids" by Sleigh Bells). Outputs go in the input file's folder:
 results are appended to music_mentions.jsonl as they arrive, so an interrupted run resumes where it stopped (rows
 from before a question was added are asked again). At the end every row is written to music_mentions.csv, and
 music_mentions_flagged.json gets the comments worth sending to the extraction child (see classify()):
-- a comment that looks like instructions to an AI is quarantined: never flagged, written with its text to
+- a comment that looks like instructions aimed at Claude is quarantined: never flagged, written with its text to
   quarantined.jsonl and counted, whatever else it says;
 - spam or self-promotion is skipped and counted;
 - a comment naming a song is flagged; one naming an artist is flagged only if it names someone other than the
@@ -110,9 +110,9 @@ DEFAULT_THRESHOLDS = {"song": 0.8, "artist": 0.8, "other_artist": 0.3, "instruct
 
 
 def classify(row: dict, t: dict) -> str:
-    """What happens to one comment: "quarantine" (looks like instructions to an AI), "spam", "flag" (send it to the
-    extraction child), "own_artist" (names only the video's own artist) or "none" (names no music).
-    A row from before a question existed counts as keeping it: other artist yes, AI instructions and spam no."""
+    """What happens to one comment: "quarantine" (looks like instructions aimed at Claude), "spam", "flag" (send it
+    to the extraction child), "own_artist" (names only the video's own artist) or "none" (names no music).
+    A row from before a question existed counts as keeping it: other artist yes, instructions and spam no."""
     if row.get("p_instructs_ai", 0.0) >= t["instructs_ai"]:
         return "quarantine"
     song, artist = row["p_song"] >= t["song"], row["p_artist"] >= t["artist"]
@@ -322,7 +322,7 @@ def main():
                         help="a comment naming an artist is flagged only if it names someone other than the video's "
                              "own artist at p >= this (default: %(default)s; low, since a wrong skip loses a lead)")
     parser.add_argument("--injection-threshold", type=float, default=DEFAULT_THRESHOLDS["instructs_ai"],
-                        help="quarantine a comment that looks like instructions to an AI at p >= this "
+                        help="quarantine a comment that looks like instructions aimed at Claude at p >= this "
                              "(default: %(default)s)")
     parser.add_argument("--spam-threshold", type=float, default=DEFAULT_THRESHOLDS["spam"],
                         help="skip spam or self-promotion at p >= this (default: %(default)s)")
@@ -375,7 +375,7 @@ def main():
     counts = write_flagged(refreshed, flagged_path, t, len(comments), failed)
     print(f"{counts['flag']:,} of {len(refreshed):,} flagged -> {flagged_path}; skipped: "
           f"{counts['own_artist']:,} name only the video's own artist, {counts['spam']:,} spam, "
-          f"{counts['none']:,} name no music; {counts['quarantine']:,} quarantined as instructions to an AI "
+          f"{counts['none']:,} name no music; {counts['quarantine']:,} quarantined as instructions aimed at Claude "
           f"(quarantined.jsonl)", file=sys.stderr)
 
     if failed:

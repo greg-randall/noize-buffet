@@ -27,7 +27,7 @@ CUES = [
     re.compile(r"[\"“][^\"“”]{2,80}[\"”]"),                          # a quoted title
 ]
 REPLY_MENTION_RE = re.compile("\xa0@[^\xa0]+\xa0")  # YouTube wraps reply @handles in non-breaking spaces
-# Comments that look like instructions to an AI are quarantined, never flagged: written with their text to
+# Comments that look like instructions aimed at Claude are quarantined, never flagged: written with their text to
 # quarantined.jsonl and counted. Cruder than TypeSafe's question and easy to word around; confinement of the
 # extraction child is the real protection, this only keeps the obvious attempts away from it.
 INJECTION = [
@@ -81,7 +81,7 @@ def main():
     out.write_text(json.dumps({"filter": "keyword", "comments_checked": len(comments), "quarantined": len(quarantined),
                                "flagged": flagged}, indent=2, ensure_ascii=False), encoding="utf-8")
     print(f"{len(flagged):,} of {len(comments):,} comments flagged by keywords -> {out}; {len(quarantined):,} "
-          f"quarantined as instructions to an AI (quarantined.jsonl)", file=sys.stderr)
+          f"quarantined as instructions aimed at Claude (quarantined.jsonl)", file=sys.stderr)
 
 
 if __name__ == "__main__":

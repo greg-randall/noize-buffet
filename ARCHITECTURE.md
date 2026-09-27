@@ -90,12 +90,12 @@ Rating a song top or yes (`nb_save_listen()`), or adding it with bucket `user`, 
 | names a song | `typesafe_song_threshold` 0.8 | flag |
 | names an artist | `typesafe_artist_threshold` 0.8 | flag, if also another artist |
 | names an artist other than the video's own | `typesafe_other_artist_threshold` 0.3 | below it: skipped as own-artist-only |
-| instructions to an AI or automated system | `typesafe_injection_threshold` 0.5 | quarantined, whatever else it says |
+| tries to give instructions to Claude or another program | `typesafe_injection_threshold` 0.5 | quarantined, whatever else it says |
 | spam or self-promotion | `typesafe_spam_threshold` 0.9 | skipped |
 
 `classify()` applies them in that priority. Answers are appended to `music_mentions.jsonl` as they arrive, so an interrupted run resumes and a re-mined video costs nothing; rows missing a question are asked again. Measured on 564 real comments from 3 videos plus 10 made-up attacks (`mining/typesafe_experiment.py`, answers saved in `tests/fixtures/mining/typesafe_answers.jsonl`): every attack scored 0.92–0.99 and no real comment above 0.06; no comment that Haiku found another artist in was skipped at any other-artist threshold from 0.1 to 0.7; no real comment reached the spam threshold. `tests/test_mining_real.py` checks those answers still hold.
 
-The keyword filter (no key) flags cue phrases ("sounds like", "if you like"), "Artist - Song" dashes and quoted titles, and quarantines obvious instruction attempts ("ignore your instructions", "you are an AI"). On the same comments it caught half of those naming another artist.
+The keyword filter (no key) flags cue phrases ("sounds like", "if you like"), "Artist - Song" dashes and quoted titles, and quarantines obvious instruction attempts ("ignore your instructions", "you are a bot"). On the same comments it caught half of those naming another artist.
 
 ### Merging leads
 

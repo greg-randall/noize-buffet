@@ -1,11 +1,11 @@
 """Measure the TypeSafe filter's questions on real comments before trusting them. Needs the TypeSafe key.
 
 Asks TypeSafe the five questions find_music_mentions.py asks (song, artist, another artist than the video's own,
-instructions to an AI, spam) about the 564 real comments in tests/fixtures/mining/real_comments.jsonl, plus a
+instructions aimed at Claude, spam) about the 564 real comments in tests/fixtures/mining/real_comments.jsonl, plus a
 handful of made-up attacks, and compares the answers with the fixture's real Haiku extractions:
 - other artist: at each threshold, how many comments naming another artist (per Haiku) would be skipped by mistake,
   and how many comments naming only the video's own artist would be skipped correctly;
-- instructions to an AI: how many real comments trip it (should be none) and which made-up attacks it catches;
+- instructions aimed at Claude: how many real comments trip it (should be none) and which made-up attacks it catches;
 - spam: how many comments each threshold would skip, and the most spam-like ones, to read.
 
 About a cent of TypeSafe credit (input tokens only). Answers are cached in data/typesafe-experiment.jsonl, so a
@@ -109,10 +109,10 @@ def analyze(rows: list, comments: list, t: dict) -> str:
         out.append(f"- p={by_id[c['comment_id']]['p_other_artist']:.2f} [{c['video_channel']}] {c['text'][:140]!r}")
     out.append("")
 
-    # Instructions to an AI.
+    # Instructions aimed at Claude.
     p_ai = sorted(((by_id[c["comment_id"]]["p_instructs_ai"], c["text"]) for c in real), reverse=True)
     tripped = [(p, x) for p, x in p_ai if p >= t["instructs_ai"]]
-    out.append(f"## Instructions to an AI\n\nReal comments at or above {t['instructs_ai']}: {len(tripped)} "
+    out.append(f"## Instructions aimed at Claude\n\nReal comments at or above {t['instructs_ai']}: {len(tripped)} "
                f"(these would be quarantined wrongly).")
     for p, x in p_ai[:5]:
         out.append(f"- {p:.2f} {x[:120]!r}")

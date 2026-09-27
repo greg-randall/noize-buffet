@@ -156,10 +156,10 @@ check($code === 1 && $r['status'] === 'failed' && str_starts_with((string)$r['er
     'TypeSafe wrote no flagged file: the video fails, naming the filter');
 
 [$code, $out, $r] = $mineTs('V0000000013', ['NB_FAKE_TS_COUNTS' => '{"quarantined": 2, "own_artist_skipped": 5, "spam_skipped": 1}']);
-check($code === 0 && $r['status'] === 'done' && str_contains((string)$r['notes'], '2 comments looked like instructions to an AI')
+check($code === 0 && $r['status'] === 'done' && str_contains((string)$r['notes'], '2 comments looked like instructions aimed at Claude')
     && str_contains((string)$r['notes'], 'quarantined.jsonl') && str_contains((string)$r['notes'], '5 only name the video')
     && str_contains((string)$r['notes'], '1 spam'), "what the filter skipped or quarantined is in the row's notes");
-check(str_contains($out, '2 comments looked like instructions to an AI'), 'and in the output');
+check(str_contains($out, '2 comments looked like instructions aimed at Claude'), 'and in the output');
 
 [$code, $out, $r] = $mineTs('V0000000009', ['NB_FAKE_TS_OMIT_FAILED' => '1']);
 check($code === 0 && $r['status'] === 'done' && $r['error'] === null, 'a flagged file without a "failed" count is read as none failed');

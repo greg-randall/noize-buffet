@@ -153,7 +153,7 @@ try {
     // What the filter kept away from the extraction child, counted so nothing disappears silently.
     $notes = [];
     if (($n = (int)($filtered['quarantined'] ?? 0)) > 0) {
-        $notes[] = "$n comments looked like instructions to an AI and were not sent to Claude (their text is in "
+        $notes[] = "$n comments looked like instructions aimed at Claude and were not sent to it (their text is in "
             . "comments/$vid/quarantined.jsonl)";
     }
     if (($n = (int)($filtered['own_artist_skipped'] ?? 0)) > 0) {

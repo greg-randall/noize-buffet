@@ -441,7 +441,7 @@ else:
     check(fmm.classify(r(song=0.9, artist=0.1, other=0.0, ai=0.0, spam=0.0), T) == "flag",
           "names a song: flagged even if no other artist")
     check(fmm.classify(r(song=0.9, artist=0.9, other=0.9, ai=0.8, spam=0.0), T) == "quarantine",
-          "looks like instructions to an AI: quarantined, whatever else it names")
+          "looks like instructions aimed at Claude: quarantined, whatever else it names")
     check(fmm.classify(r(artist=0.9, other=0.9, ai=0.0, spam=0.95), T) == "spam", "spam naming an artist: skipped")
     check(fmm.classify(r(artist=0.1, ai=0.0, spam=0.99), T) == "none", "spam naming no music counts as no music")
     check(fmm.classify(r(artist=0.95), T) == "flag", "a cached row from before the new questions is kept")
@@ -601,14 +601,16 @@ check(cli.returncode == 0 and len(json.loads(cli.stdout)["leads"]) == len(r["lea
 own_root = TMP / "merge_own"
 shutil.rmtree(own_root, ignore_errors=True)
 root_saved, root = root, own_root
-mined("VIDEOOWN001", {"c1": ix("@hud", "cry sugar better https://hudmo.ffm.to", 25014), "c2": ix("@x", "TNGHT vibes", 3),
-                      "c3": ix("@y", "hudson mohawke and tnght", 2)},
+mined("VIDEOOWN001", {"c1": ix("@hud", "cry sugar better https://hudmo.ffm.to", 25014),
+                      "c2": ix("@x", "TNGHT vibes", 3), "c3": ix("@y", "hudson mohawke and tnght", 2)},
       "- [c1] Hudson Mohawke\n- [c2] TNGHT\n- [c3] Hudson Mohawke\n- [c3] TNGHT\n")
-(own_root / "VIDEOOWN001" / "own_artists.json").write_text(json.dumps(["Hudson Mohawke", "Warp Records"]), encoding="utf-8")
+own_names = json.dumps(["Hudson Mohawke", "Warp Records"])
+(own_root / "VIDEOOWN001" / "own_artists.json").write_text(own_names, encoding="utf-8")
 own = merge_leads.merge(own_root)
 by_own = {lead["name_key"]: lead for lead in own["leads"]}
 check("hudsonmohawke" not in by_own and by_own["tnght"]["people"] == 2 and own["skipped"]["own artist"] == 2,
-      "the video's own artist (own_artists.json) is never a lead under that video, even untagged; counted as own artist")
+      "the video's own artist (own_artists.json) is never a lead under that video, even untagged; "
+      "counted as own artist")
 root = root_saved
 
 only = merge_leads.merge(root, only={"VIDEOBBBBBB", "VIDEOCCCCCC"})
