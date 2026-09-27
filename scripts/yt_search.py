@@ -1,7 +1,8 @@
 """Search YouTube with yt-dlp and print JSON results.
 
 Usage: python3 scripts/yt_search.py "artist song" ["another artist song" ...] [-n 5]
-Output with one query: [{"video_id", "title", "channel", "duration_s", "url"}, ...]
+Output with one query: [{"video_id", "title", "channel", "duration_s", "views", "url"}, ...]
+(views: the video's view count, a rough measure of how well known the song is; null if YouTube gave none)
 Output with several queries: {"query": [results...], ...} (searches run one after another)
 """
 import argparse
@@ -11,7 +12,7 @@ import subprocess
 import sys
 
 VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
-FIELDS = "%(id)s\t%(title)s\t%(channel)s\t%(duration)s"
+FIELDS = "%(id)s\t%(title)s\t%(channel)s\t%(duration)s\t%(view_count)s"
 
 
 def parse_lines(text):
@@ -19,9 +20,9 @@ def parse_lines(text):
     rows = []
     for line in text.splitlines():
         parts = line.split("\t")
-        if len(parts) != 4 or not VIDEO_ID_RE.match(parts[0]):
+        if len(parts) != 5 or not VIDEO_ID_RE.match(parts[0]):
             continue
-        vid, title, channel, duration = parts
+        vid, title, channel, duration, views = parts
         try:
             duration_s = float(duration)
         except ValueError:
@@ -31,6 +32,7 @@ def parse_lines(text):
             "title": title,
             "channel": channel,
             "duration_s": duration_s,
+            "views": int(views) if views.isdigit() else None,
             "url": f"https://www.youtube.com/watch?v={vid}",
         })
     return rows

@@ -23,6 +23,9 @@ $q = nb_queue($pdo);
 check(array_column($q, 'video_id') === [$A, $B], 'queue in added order');
 check($q[0]['batch_summary'] === 'first batch' && $q[0]['rating'] === null, 'queue joins batch and listen columns');
 
+$side = nb_add_batch($pdo, [['video_id' => 'SIDEWAYS001', 'artist' => 'Calyx', 'title' => 'Quagmire', 'bucket' => 'sideways']], 'b', null);
+check($side['added'] === ['SIDEWAYS001'], 'a sideways song is accepted');
+
 echo "listens\n";
 $row = nb_save_listen($pdo, ['video_id' => $A, 'furthest_pct' => 40]);
 check((float)$row['furthest_pct'] === 40.0, 'furthest stored');

@@ -8,7 +8,8 @@ require_once __DIR__ . '/parent_process.php';
 // Read, Edit and Write are deliberately NOT listed: a bare rule allows them on any path. Without one, reads in the
 // repo need no approval and --permission-mode acceptEdits approves edits in the repo; anything outside it would
 // need approval, which a headless run can't give, so it is refused.
-const NB_PARENT_TOOLS = 'WebSearch WebFetch Bash(php bin/nb.php *) Bash(python3 scripts/yt_search.py *)';
+const NB_PARENT_TOOLS = 'WebSearch WebFetch Bash(php bin/nb.php *) Bash(python3 scripts/yt_search.py *) '
+    . 'Bash(python3 scripts/spotify_playlist.py *)';
 // The only built-in tools the parent has at all (drops Task, Cron, Glob, etc.).
 const NB_PARENT_BUILTIN_TOOLS = 'Read,Edit,Write,WebSearch,WebFetch,Bash';
 
@@ -111,6 +112,11 @@ function nb_activity_text(string $tool, array $input): ?string
     switch ($tool) {
         case 'Bash':
             $cmd = trim((string)($input['command'] ?? ''));
+            if (str_starts_with($cmd, 'python3 scripts/spotify_playlist.py')) {
+                $n = count(array_filter(preg_split('/\s+/', (string)preg_replace('/--seed\s+("[^"]*"|\'[^\']*\'|\S+)/', '', substr($cmd, 35))),
+                    fn($a) => $a !== ''));
+                return 'Reading Spotify playlists' . ($n > 1 ? " ($n)" : '');
+            }
             if (str_starts_with($cmd, 'python3 scripts/yt_search.py')) {
                 $n = preg_match_all('/"[^"]*"|\'[^\']*\'/', $cmd);
                 return 'Searching YouTube' . ($n > 1 ? " ($n songs)" : '');

@@ -47,7 +47,8 @@ check($opt($a, '--input-format') === 'stream-json' && $opt($a, '--output-format'
 check($opt($a, '--tools') === 'Read,Edit,Write,WebSearch,WebFetch,Bash', 'built-in tools restricted');
 check(in_array('acceptEdits', $a, true) && $opt($a, '--model') === 'sonnet', 'permission mode and model');
 $tools = (string)$opt($a, '--allowedTools');
-check(str_contains($tools, 'Bash(php bin/nb.php *)') && str_contains($tools, 'Bash(python3 scripts/yt_search.py *)'), 'narrow allowed tools');
+check(str_contains($tools, 'Bash(php bin/nb.php *)') && str_contains($tools, 'Bash(python3 scripts/yt_search.py *)')
+    && str_contains($tools, 'Bash(python3 scripts/spotify_playlist.py *)'), 'narrow allowed tools');
 check(!preg_match('/(^| )(Read|Edit|Write)( |$)/', $tools), 'no path-less Read/Edit/Write rule (it would allow any path)');
 check(in_array('--disable-slash-commands', $a, true), 'skills and commands disabled');
 $settings = json_decode((string)$opt($a, '--settings'), true);
@@ -132,6 +133,8 @@ check(in_array('Checking the queue', $seen, true), "tool call becomes the runnin
 check(nb_setting($pdo, 'agent_activity') === null, 'activity cleared when the job ends');
 check(nb_activity_text('Bash', ['command' => 'python3 scripts/yt_search.py "a b" "c d" "e" -n 5']) === 'Searching YouTube (3 songs)', 'YouTube search with a song count');
 check(nb_activity_text('Bash', ['command' => "python3 scripts/yt_search.py 'one song'"]) === 'Searching YouTube', 'single search');
+check(nb_activity_text('Bash', ['command' => 'python3 scripts/spotify_playlist.py AAA BBB CCC --seed "x y"']) === 'Reading Spotify playlists (3)',
+    'Spotify playlists with a count');
 check(nb_activity_text('Bash', ['command' => 'php bin/nb.php feedback']) === 'Reading your ratings and notes', 'feedback');
 check(nb_activity_text('Bash', ['command' => 'php bin/nb.php say "hi"']) === null, 'say leaves the activity alone');
 check(nb_activity_text('Read', ['file_path' => '/x/taste.md']) === 'Reading your taste notes', 'reading taste.md');

@@ -15,9 +15,9 @@ def check(cond, msg):
 
 
 sample = "\n".join([
-    "UCabcdefghijklmnopqrstuv\tSome Channel\tSome Channel\tNA",
-    "AAAAAAAAAAA\tSong A (Official Video)\tArtist A\t201",
-    "BBBBBBBBBBB\tSong B\tLabel\tNA",
+    "UCabcdefghijklmnopqrstuv\tSome Channel\tSome Channel\tNA\tNA",
+    "AAAAAAAAAAA\tSong A (Official Video)\tArtist A\t201\t391278003",
+    "BBBBBBBBBBB\tSong B\tLabel\tNA\tNA",
     "garbage line",
 ])
 rows = yt_search.parse_lines(sample)
@@ -25,6 +25,8 @@ check([r["video_id"] for r in rows] == ["AAAAAAAAAAA", "BBBBBBBBBBB"], "channel 
 check(rows[0]["duration_s"] == 201.0 and rows[1]["duration_s"] is None, "durations parsed, NA -> None")
 check(rows[0]["url"] == "https://www.youtube.com/watch?v=AAAAAAAAAAA", "url built")
 check(rows[0]["title"] == "Song A (Official Video)" and rows[0]["channel"] == "Artist A", "title and channel")
+check(rows[0]["views"] == 391278003 and rows[1]["views"] is None, "view counts parsed, NA -> None")
+check("%(view_count)s" in yt_search.FIELDS, "and asked of yt-dlp")
 
 import subprocess  # noqa: E402
 script = os.path.join(os.path.dirname(__file__), "..", "scripts", "yt_search.py")

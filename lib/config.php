@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 const NB_CONFIG_DEFAULTS = [
     'batch_size' => 12,
-    'mix' => ['close' => 0.7, 'lead' => 0.2, 'wildcard' => 0.1],
+    'mix' => ['close' => 0.6, 'lead' => 0.2, 'sideways' => 0.1, 'wildcard' => 0.1],
     'parent_model' => 'sonnet',
     'session_rotate_turns' => 40,
     'job_timeout_s' => 600, // give up on a job (and restart the agent process) after this long

@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 const NB_RATINGS = ['top', 'yes', 'good', 'ok', 'meh', 'no'];
-const NB_BUCKETS = ['close', 'lead', 'wildcard', 'user'];
+const NB_BUCKETS = ['close', 'lead', 'sideways', 'wildcard', 'user'];
 const NB_JOB_KINDS = ['interview', 'chat', 'refill'];
 const NB_MUTE_KINDS = ['artist', 'lane'];
 const NB_NOTE_HISTORY_AFTER_S = 600; // keep an old note only if last changed 10+ minutes ago

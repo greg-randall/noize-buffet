@@ -53,7 +53,7 @@ Open the address it prints (usually http://localhost:8000). It asks you a few qu
 
 1. **The interview.** The first time, Claude asks what you're hoping to find, a few songs you love and why, and anything you don't want. It checks the songs you named on YouTube and asks about anything unclear. It writes your goal, in your words, to `brief.md`, and its notes on your taste to `taste.md`.
 2. **Research.** Before each batch, Claude looks into the songs you like: their record labels and the other artists on them, the producers and collaborators, "similar artist" pages on music sites, and the scenes around them. One person's recommendation isn't enough on its own; it needs a second, independent sign.
-3. **The batch.** It adds about 12 songs: mostly close to what you like, some from the artists and labels it turned up, and one wildcard to test the edges of your taste. Each song records why it was picked and the page that led to it, which you can see in the playlist.
+3. **The batch.** It adds about 12 songs: mostly close to what you like, some from the artists and labels it turned up, one **sideways** pick from somewhere a "similar artists" page would never lead (a stranger's Spotify playlist, a DJ's set list, what else someone who bought a record you love bought, or a well-liked tip from one YouTube commenter about a little-known artist), and one wildcard to test the edges of your taste. Each song records why it was picked and the page that led to it, which you can see in the playlist.
 4. **Listening.** For each song, the page records how far you got, your rating (top, yes, good, ok, meh, no), whether it was new to you, and whether it's good but not what you're after.
 5. **Chatting.** When you comment on the song that's playing, Claude saves your words as a note on it, fills in the rating your comment implies (you can change it), and updates its notes on your taste. You can also paste a song you found, ask for more, or ask it to stop suggesting an artist.
 6. **Refills.** When only 5 songs are left unplayed, a new batch starts automatically. Each batch reads your ratings, notes and chat since the last one.
@@ -86,7 +86,7 @@ If your Claude usage runs out, the chat says so. Until it resets, comment readin
 - `NB_PORT=8080 python3 start.py` uses that exact port. Without it, noize-buffet uses 8000, or a random free port if 8000 is taken.
 - `python3 start.py --no-typesafe` runs without a TypeSafe key. Comment reading then uses a simple keyword filter, which found only about half as many useful comments in testing.
 
-`config.json` holds the settings: how many songs per batch and the mix between close picks, leads and wildcards, which Claude model to use, when to refill, and the comment-reading limits.
+`config.json` holds the settings: how many songs per batch and the mix between close picks, leads, sideways picks and wildcards, which Claude model to use, when to refill, and the comment-reading limits.
 
 ## More detail
 

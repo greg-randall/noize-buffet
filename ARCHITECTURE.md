@@ -20,7 +20,7 @@ One SQLite file, `data/music.sqlite` (`NB_DB` overrides it; the tests use this).
 
 | Table | Holds |
 |---|---|
-| `songs` | every song added: video id, artist, title, bucket (close, lead, wildcard, user), reason, source, batch |
+| `songs` | every song added: video id, artist, title, bucket (close, lead, sideways, wildcard, user), reason, source, batch |
 | `batches` | each batch's summary and the job that made it |
 | `listens` | per song: furthest %, rating, notes, off-brief, new-to-me, skipped, finished |
 | `note_history` | notes replaced after they had stood for 10 minutes |
@@ -41,13 +41,13 @@ The agent is one long-lived `claude -p --input-format stream-json --output-forma
 
 Its command line (`nb_parent_command()`):
 
-- `--tools Read,Edit,Write,WebSearch,WebFetch,Bash` and `--allowedTools "WebSearch WebFetch Bash(php bin/nb.php *) Bash(python3 scripts/yt_search.py *)"`, with `--permission-mode acceptEdits`. Read, Edit and Write have no allow rule on purpose (a bare rule allows any path): reads in the repo need no approval, edits in the repo are accepted, and anything outside would need an approval a headless run can't give, so it is refused.
+- `--tools Read,Edit,Write,WebSearch,WebFetch,Bash` and `--allowedTools "WebSearch WebFetch Bash(php bin/nb.php *) Bash(python3 scripts/yt_search.py *) Bash(python3 scripts/spotify_playlist.py *)"`, with `--permission-mode acceptEdits`. Read, Edit and Write have no allow rule on purpose (a bare rule allows any path): reads in the repo need no approval, edits in the repo are accepted, and anything outside would need an approval a headless run can't give, so it is refused.
 - `--settings` with `nb_parent_settings()`: `claudeMdExcludes` for every instruction file above the repo, in the user's `~/.claude`, and under `comments/` (so a mined video's `CLAUDE.md` never reaches it); hooks and auto memory off; and `permissions.deny` for reading or editing `.env` (and `NB_ENV_FILE`), since the agent reads comments written by strangers and can fetch web pages.
 - `--disable-slash-commands`.
 
 Tool calls stream into the `settings` table as the agent's current activity ("Searching YouTube (12 songs)"), which the page shows. Refused tools are posted to the chat. Each job writes `data/jobs/<id>.json`: prompt, process, duration, denials, every event, and the path to Claude Code's transcript.
 
-The agent's only commands are `bin/nb.php` (JSON in and out, every call logged to `data/nb.log`) and `scripts/yt_search.py` (yt-dlp search, several queries per call):
+The agent's only commands are `bin/nb.php` (JSON in and out, every call logged to `data/nb.log`), `scripts/yt_search.py` (yt-dlp search, several queries per call, with each video's view count) and `scripts/spotify_playlist.py` (reads public Spotify playlists from the embeddable player page, `open.spotify.com/embed/playlist/<id>`, whose page data carries the first 100 tracks; no account or key; one playlist a second; `--seed` checks a song is still on it):
 
 | `nb.php` | Does |
 |---|---|
@@ -58,7 +58,7 @@ The agent's only commands are `bin/nb.php` (JSON in and out, every call logged t
 | `say <text>` | post to the chat at once, mid-job |
 | `leads`, `lead <name>` | the mined leads (with `already_in_queue` and `muted`), and every comment behind one |
 
-Its rules are in `CLAUDE.md`.
+Its rules are in `CLAUDE.md`, including the **sideways** picks (Spotify playlists found by web search, DJ tracklists, Bandcamp buyers' collections, samples) and when a single person's recommendation may be used: specific (names a song) or liked 10+ times, and the artist under about a million YouTube views; one-person mentions of artists with 10 million+ views are skipped.
 
 ### Running out of usage
 
@@ -128,7 +128,7 @@ Around each run, the runner:
 | Key | Default | Meaning |
 |---|---|---|
 | `batch_size` | 12 | songs per batch |
-| `mix` | 0.7 / 0.2 / 0.1 | share of close, lead and wildcard songs |
+| `mix` | 0.6 / 0.2 / 0.1 / 0.1 | share of close, lead, sideways and wildcard songs |
 | `parent_model` | `sonnet` | the agent's Claude model |
 | `session_rotate_turns` | 40 | jobs before the agent's conversation starts over |
 | `job_timeout_s` | 600 | give up on a job (and restart the agent) after this long |
@@ -157,7 +157,8 @@ Around each run, the runner:
 | `lib/isolation.php` | the settings that hide other instruction files and deny `.env` |
 | `lib/config.php` | defaults overlaid with `config.json` |
 | `scripts/job_worker.php`, `scripts/mine_worker.php`, `scripts/mine_video.php` | the workers and the per-video pipeline |
-| `scripts/yt_search.py` | YouTube search for the agent |
+| `scripts/yt_search.py` | YouTube search for the agent, with view counts |
+| `scripts/spotify_playlist.py` | reads public Spotify playlists for the agent |
 | `scripts/check_confinement.php` | the real confinement check |
 | `mining/` | filters, `prepare.py`, `coverage.py`, `merge_leads.py`, `mentions.py` (shared parsing), `child_CLAUDE.md`, `typesafe_experiment.py` |
 | `player/` | the page, `api.php`, `app.js` |
