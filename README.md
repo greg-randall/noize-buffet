@@ -10,7 +10,7 @@ The picking is done by Claude, a machine-learning model.
 
 ![noize-buffet: the player, song details and ratings on the left with the playlist below, and the chat on the right](screenshot.webp)
 
-**Cost.** It runs on your Claude subscription, so there's nothing extra to pay Anthropic; it counts toward your plan's usage limits like any other Claude use (a new batch of songs uses about as much as 20 chat messages). The one extra cost is TypeSafe, a service that sorts text quickly and cheaply. noize-buffet uses it to pick out the YouTube comments that seem to mention other music, so Claude reads only those: on one song, 3,000 comments came down to 128. That saves a lot of your Claude usage, and costs up to about 9 cents for each song you love.
+**Cost.** It runs on your Claude subscription (a paid plan such as Pro or Max; the free plan doesn't include Claude Code), so there's nothing extra to pay Anthropic; it counts toward your plan's usage limits like any other Claude use (a new batch of songs uses about as much as 20 chat messages). The one extra cost is TypeSafe, a service that sorts text quickly and cheaply. noize-buffet uses it to pick out the YouTube comments that seem to mention other music, so Claude reads only those: on one song, 3,000 comments came down to 128. That saves a lot of your Claude usage, and costs up to about 9 cents for each song you love.
 
 ## Quickstart
 
@@ -18,7 +18,11 @@ You need Linux, Windows with WSL, or macOS (which also needs GNU coreutils; `sta
 
     sudo apt install php-cli php-sqlite3 php-intl php-mbstring python3-pip git
 
-and [Claude Code](https://claude.com/claude-code), then run `claude` once to log in. Then:
+Install [Claude Code](https://code.claude.com/docs/en/setup):
+
+    curl -fsSL https://claude.ai/install.sh | bash
+
+Open a new terminal and run `claude` once to log in with your Claude account. Then:
 
     git clone https://github.com/greg-randall/noize-buffet.git
     cd noize-buffet

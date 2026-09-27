@@ -64,7 +64,7 @@ plan = out.split("To install what's missing, run:")[1]
 check("sudo apt install php-sqlite3 php-intl php-mbstring\n" in plan, "one apt command for all the PHP extensions")
 check(plan.count("python3 -m pip install -r requirements.txt") == 1,
       "yt-dlp and the TypeSafe packages share one pip line")
-check("https://claude.com/claude-code" in plan and "Then run python3 start.py again." in out,
+check("curl -fsSL https://claude.ai/install.sh | bash" in plan and "Then run python3 start.py again." in out,
       "and Claude Code, then what next")
 
 print("macOS with nothing but Python")

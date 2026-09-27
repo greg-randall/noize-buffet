@@ -54,7 +54,8 @@ INSTALL = {
     "python": {"apt": "sudo apt install python3", "brew": "brew install python"},
     "pip": {"apt": "sudo apt install python3-pip", "brew": "brew install python"},
     "packages": {"any": "python3 -m pip install -r requirements.txt"},
-    "claude": {"any": "install Claude Code from https://claude.com/claude-code, then run `claude` once to log in"},
+    "claude": {"any": "curl -fsSL https://claude.ai/install.sh | bash  # installs Claude Code; then open a new "
+                      "terminal and run `claude` once to log in"},
     "login": {"any": "claude auth login"},
 }
 DESCRIBE = {  # for systems with neither apt nor brew
