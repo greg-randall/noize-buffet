@@ -281,7 +281,23 @@ function nb_child_command(string $chunk, string $workDir, array $config): array
         '--output-format', 'json',
         '--settings', json_encode(nb_isolation_settings($workDir), JSON_UNESCAPED_SLASHES),
         '--disable-slash-commands',
+        // Otherwise every child saves a transcript (full of untrusted comment text) under ~/.claude/projects.
+        '--no-session-persistence',
+        ...nb_child_permission_mode($config),
     ];
+}
+
+/** --permission-mode for the child from mining_child_permission_mode: none, or dontAsk; nothing looser. */
+function nb_child_permission_mode(array $config): array
+{
+    $mode = (string)($config['mining_child_permission_mode'] ?? '');
+    if ($mode === '') {
+        return [];
+    }
+    if ($mode !== 'dontAsk') {
+        throw new InvalidArgumentException("mining_child_permission_mode must be '' or 'dontAsk', not '$mode'");
+    }
+    return ['--permission-mode', 'dontAsk'];
 }
 
 /**

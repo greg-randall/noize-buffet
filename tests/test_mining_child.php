@@ -404,12 +404,22 @@ $settingsJson = $cmd[16] ?? '';
 $withoutSettings = $cmd;
 $withoutSettings[16] = 'SETTINGS';
 check($withoutSettings === [$fake, '-p', $prompt, '--model', 'sonnet', '--tools', 'Read,Write', '--restricted', '--strict-mcp-config',
-    '--max-budget-usd', '0.5', '--allowedTools', $editRule, '--output-format', 'json', '--settings', 'SETTINGS', '--disable-slash-commands'],
-    'the exact argument list: model, only Read and Write, --restricted, --strict-mcp-config, the budget as a string, one Edit rule, JSON output, settings, no slash commands');
+    '--max-budget-usd', '0.5', '--allowedTools', $editRule, '--output-format', 'json', '--settings', 'SETTINGS', '--disable-slash-commands',
+    '--no-session-persistence'],
+    'the exact argument list: model, only Read and Write, --restricted, --strict-mcp-config, the budget as a string, one Edit rule, JSON output, settings, no slash commands, no saved session');
 check(json_decode($settingsJson, true) === nb_isolation_settings($dir), "the settings are the isolation settings for the child's folder");
 check(str_starts_with($cmd[12], 'Edit(//') && !str_starts_with($cmd[12], 'Edit(///') && str_ends_with($cmd[12], '/artists.chunk-01.md)'),
     'the only allowed edit is this run\'s output file, as an absolute //path');
 check(!in_array('--permission-mode', $cmd, true) && !in_array('acceptEdits', $cmd, true), 'no --permission-mode, so anything not allowed is refused');
+$dontAsk = nb_child_command('chunk-01.md', $dir, ['mining_child_permission_mode' => 'dontAsk'] + $config);
+check(array_slice($dontAsk, -2) === ['--permission-mode', 'dontAsk'], 'mining_child_permission_mode dontAsk adds --permission-mode dontAsk');
+$threw = false;
+try {
+    nb_child_command('chunk-01.md', $dir, ['mining_child_permission_mode' => 'bypassPermissions'] + $config);
+} catch (InvalidArgumentException) {
+    $threw = true;
+}
+check($threw, 'any other permission mode (e.g. bypassPermissions) is refused');
 check(!in_array('--dangerously-skip-permissions', $cmd, true) && !in_array('--resume', $cmd, true), 'no permission bypass, no session to resume');
 check(count(array_keys($cmd, '--allowedTools', true)) === 1 && !preg_grep('/^(Bash|WebFetch|WebSearch)/', $cmd), 'one allowed-tools rule and no Bash or web tools');
 $cmd = nb_child_command('chunk-01.md', $dir, ['mining_child_max_budget_usd' => 2.5] + $config);

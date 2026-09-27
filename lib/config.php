@@ -15,6 +15,9 @@ const NB_CONFIG_DEFAULTS = [
     'mining_child_model' => 'haiku',
     'mining_child_timeout_s' => 600, // kill an extraction child after this long
     'mining_child_max_budget_usd' => 1.0,
+    // '' (no --permission-mode: headless Claude refuses what isn't allowed) or 'dontAsk' (refuse explicitly).
+    // scripts/check_confinement.php tries both; set 'dontAsk' if it passes with it.
+    'mining_child_permission_mode' => '',
     'typesafe_song_threshold' => 0.8,
     'typesafe_artist_threshold' => 0.8,
     // A comment naming an artist goes to the extraction child only if TypeSafe thinks it names someone other than

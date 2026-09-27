@@ -12,6 +12,7 @@
   "mining_child_model": "haiku",
   "mining_child_timeout_s": 600,
   "mining_child_max_budget_usd": 1.0,
+  "mining_child_permission_mode": "",
   "typesafe_song_threshold": 0.8,
   "typesafe_artist_threshold": 0.8,
   "typesafe_other_artist_threshold": 0.3,
