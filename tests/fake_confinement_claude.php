@@ -42,10 +42,10 @@ if (is_link('artists.chunk-check.md') && !$leaky) {
 }
 file_put_contents('artists.chunk-check.md', "inside\n");
 $reply = 'step 1 worked';
-if ($leaky && preg_match("/'outside' to (\S+)\. /", $prompt, $m)) {
+if ($leaky && preg_match('/\'outside\' to the file "([^"]+)"/', $prompt, $m)) {
     file_put_contents('notes.txt', 'sibling');
     file_put_contents($m[1], 'outside');
-    preg_match('/Read (\S+) and include/', $prompt, $s);
+    preg_match('/Read the file "([^"]+)" and include/', $prompt, $s);
     $reply .= ' ' . file_get_contents($s[1]) . ' ' . file_get_contents('fake.env');
 }
 $emit($reply);
