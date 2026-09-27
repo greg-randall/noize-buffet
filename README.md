@@ -10,7 +10,7 @@ The picking is done by Claude, a machine-learning model.
 
 ![noize-buffet: the player, song details and ratings on the left with the playlist below, and the chat on the right](screenshot.webp)
 
-**Cost.** It runs on your Claude subscription, so there's nothing extra to pay Anthropic; it counts toward your plan's usage limits like any other Claude use (a new batch of songs uses about as much as 20 chat messages). The one extra cost is TypeSafe, a service that sorts YouTube comments: up to about 9 cents for each song you love.
+**Cost.** It runs on your Claude subscription, so there's nothing extra to pay Anthropic; it counts toward your plan's usage limits like any other Claude use (a new batch of songs uses about as much as 20 chat messages). The one extra cost is TypeSafe, a service that sorts text quickly and cheaply. noize-buffet uses it to pick out the YouTube comments that seem to mention other music, so Claude reads only those: on one song, 3,000 comments came down to 128. That saves a lot of your Claude usage, and costs up to about 9 cents for each song you love.
 
 ## Quickstart
 
