@@ -47,7 +47,7 @@ Open the address it prints (usually http://localhost:8000). It asks you a few qu
 
 - **The web page** is where you listen, rate and chat. Your ratings and messages go into the database.
 - **The job worker** takes your messages from the database, one at a time, and hands them to Claude. Claude researches, adds songs to the database, and writes its reply back for the page to show. It runs in the background without a window of its own, and follows a rulebook in [`CLAUDE.md`](CLAUDE.md).
-- **The comment miner** watches the database for songs you rate top or yes (or named in the interview), reads their YouTube comments, and saves the artists other listeners mention, for Claude to use.
+- **The comment miner** starts on a song within seconds of you rating it top or yes (or naming it in the interview): it reads the song's YouTube comments in the background and saves the artists other listeners mention. A song takes a few minutes, so by the time Claude builds the next batch, the leads from songs you rated earlier are usually ready. Claude never waits for it; it uses whatever leads are ready.
 
 ### Picking songs
 
