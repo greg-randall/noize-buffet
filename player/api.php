@@ -11,10 +11,37 @@ function respond(mixed $data, int $code = 200): never
     exit;
 }
 
+/**
+ * Only this page may use the API. Refuses a Host other than localhost (DNS rebinding: another site's name pointed
+ * at 127.0.0.1) and an Origin other than this server's own (another website in the same browser).
+ */
+function require_same_site(): void
+{
+    $host = strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
+    $name = preg_replace('/:\d+$/', '', $host);
+    if (!in_array($name, ['localhost', '127.0.0.1', '[::1]'], true)) {
+        respond(['ok' => false, 'error' => 'this server only answers on localhost'], 403);
+    }
+    $origin = $_SERVER['HTTP_ORIGIN'] ?? null;
+    if ($origin !== null) {
+        $o = parse_url((string)$origin);
+        // parse_url keeps an IPv6 host's brackets ("[::1]"), as the Host header does.
+        $originHost = strtolower(($o['host'] ?? '') . (isset($o['port']) ? ":{$o['port']}" : ''));
+        if ($originHost !== $host) {
+            respond(['ok' => false, 'error' => 'requests from other websites are refused'], 403);
+        }
+    }
+}
+
 function require_post(): array
 {
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         respond(['ok' => false, 'error' => 'POST required'], 405);
+    }
+    // A JSON body can't be sent cross-site without a CORS preflight, which this server never approves;
+    // text/plain and form posts can, so they are refused.
+    if (!preg_match('#^application/json\b#i', (string)($_SERVER['CONTENT_TYPE'] ?? ''))) {
+        respond(['ok' => false, 'error' => 'the body must be sent as application/json'], 415);
     }
     $in = json_decode((string)file_get_contents('php://input'), true);
     if (!is_array($in)) {
@@ -23,6 +50,7 @@ function require_post(): array
     return $in;
 }
 
+require_same_site();
 try {
     $pdo = nb_db();
     switch ($_GET['action'] ?? '') {
