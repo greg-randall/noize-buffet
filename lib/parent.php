@@ -13,11 +13,18 @@ const NB_PARENT_TOOLS = 'WebSearch WebFetch Bash(php bin/nb.php *) Bash(python3 
 // The only built-in tools the parent has at all (drops Task, Cron, Glob, etc.).
 const NB_PARENT_BUILTIN_TOOLS = 'Read,Edit,Write,WebSearch,WebFetch,Bash';
 
+/** Where the agent leaves a note for its next conversation when this one is about to start over. */
+function nb_handoff_path(): string
+{
+    return getenv('NB_HANDOFF_FILE') ?: nb_root() . '/handoff.md';
+}
+
 function nb_parent_prompt(array $job, bool $newSession): string
 {
     $intro = $newSession
         ? "You are the noize-buffet parent agent. First read CLAUDE.md in the current directory and follow it "
-          . "for this whole conversation. Then read brief.md and taste.md if they exist.\n\n"
+          . "for this whole conversation. Then read brief.md and taste.md if they exist, and handoff.md if it "
+          . "exists: it's the note you left yourself when your previous conversation ended.\n\n"
         : '';
     $sent = strtotime((string)($job['created_at'] ?? '')) ?: time();
     $intro .= sprintf("(Sent at %s, unix %d.)\n\n", gmdate('Y-m-d H:i', $sent) . ' UTC', $sent);
@@ -165,6 +172,40 @@ function nb_describe_denial(array $d): string
     return ($d['tool_name'] ?? '?') . ': ' . nb_describe_tool_input($d['tool_input'] ?? []);
 }
 
+/**
+ * Ask the conversation $sid, about to be replaced, to write handoff.md for the next one; then stop it. Resumes the
+ * session if the process isn't running it (e.g. after a worker restart). A failure is reported, not fatal: the new
+ * conversation starts either way. Returns ['written' => bool, 'error' => ?string].
+ */
+function nb_write_handoff(NbParentProcess $parent, string $sid, array $config): array
+{
+    $path = nb_handoff_path();
+    clearstatcache(true, $path);
+    $before = is_file($path) ? (string)filemtime($path) . ':' . filesize($path) . ':' . md5_file($path) : null;
+    $error = null;
+    try {
+        if (!$parent->running() || $parent->sessionId !== $sid) {
+            $parent->start(nb_parent_command($sid, $config), nb_root(), dirname(nb_db_path()) . '/parent-stderr.log');
+        }
+        $r = $parent->send("Your conversation is about to start over (it does every {$config['session_rotate_turns']} "
+            . 'messages, to stay fast). Now write handoff.md in the current directory, replacing any old one, for your '
+            . 'next conversation: what you and the user have been talking about lately, anything you promised or were '
+            . 'in the middle of, open questions, and anything they said that belongs in taste.md or brief.md but '
+            . "isn't there yet (add it there too). Under 300 words. Then reply with one line.",
+            min(180.0, (float)$config['job_timeout_s']));
+        if ($r['result'] === null || !empty($r['result']['is_error'])) {
+            $error = $r['error'] ?? (string)($r['result']['result'] ?? 'error result');
+        }
+    } catch (Throwable $e) {
+        $error = $e->getMessage();
+    }
+    $parent->stop(0.5);
+    clearstatcache(true, $path);
+    $after = is_file($path) ? (string)filemtime($path) . ':' . filesize($path) . ':' . md5_file($path) : null;
+    $written = $after !== null && $after !== $before;
+    return ['written' => $written, 'error' => $written ? null : ($error ?? 'handoff.md was not written')];
+}
+
 /** Write data/jobs/<id>.json with everything needed to debug this job. */
 function nb_write_job_debug(array $info): string
 {
@@ -181,15 +222,19 @@ function nb_write_job_debug(array $info): string
  * Run one job through the parent conversation and record the outcome.
  * $parent is the long-lived claude process; it is started, reused or restarted here as needed.
  * $onEvent gets every stream event as it arrives (the worker uses it to log tool calls).
- * Returns a summary for the worker log: ok, turns, cost_usd, denials, debug_file, process, pid.
+ * Returns a summary for the worker log: ok, turns, cost_usd, denials, debug_file, process, pid, handoff.
  */
 function nb_run_parent_job(PDO $pdo, array $job, array $config, NbParentProcess $parent, ?callable $onEvent = null): array
 {
     $jobId = (int)$job['id'];
     $sid = nb_setting($pdo, 'parent_session_id');
     $turns = (int)nb_setting($pdo, 'parent_turns', '0');
+    $handoff = null;
     if ($sid !== null && $turns >= (int)$config['session_rotate_turns']) {
-        $sid = null; // rotate: start fresh; durable memory is the files + DB
+        // Rotate: start fresh, after the old conversation writes a note for the new one (durable memory is the
+        // files + DB; the note carries what's only in the conversation).
+        $handoff = nb_write_handoff($parent, $sid, $config);
+        $sid = null;
     }
     // Reuse the running process only if it is still the saved session.
     if ($parent->running() && ($sid === null || $parent->sessionId !== $sid)) {
@@ -256,6 +301,7 @@ function nb_run_parent_job(PDO $pdo, array $job, array $config, NbParentProcess 
         'session_cost_usd' => $sessionCost,
         'permission_denials' => $denials,
         'transcript' => nb_transcript_path($newSid ?: $sid),
+        'handoff' => $handoff,
         'events' => $r['events'],
     ]);
     $summary = [
@@ -266,6 +312,7 @@ function nb_run_parent_job(PDO $pdo, array $job, array $config, NbParentProcess 
         'debug_file' => $debugFile,
         'process' => $newProcess ? 'started' : 'reused',
         'pid' => $pid,
+        'handoff' => $handoff,
     ];
 
     if ($summary['denials']) {

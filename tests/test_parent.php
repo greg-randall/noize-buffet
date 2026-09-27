@@ -17,6 +17,10 @@ chmod($fake, 0755);
 putenv("NB_CLAUDE_BIN=$fake");
 putenv("NB_FAKE_ARGS=$argsFile");
 putenv("NB_FAKE_INPUTS=$inputsFile");
+$handoffFile = tmp_dir() . '/handoff.md';
+@unlink($handoffFile);
+putenv("NB_HANDOFF_FILE=$handoffFile");
+$inputs = fn() => array_map(fn($l) => json_decode($l, true), file($inputsFile, FILE_IGNORE_NEW_LINES) ?: []);
 $config = ['parent_model' => 'sonnet', 'session_rotate_turns' => 3, 'job_timeout_s' => 20] + nb_config();
 
 /** Every process start so far, each as its argument list. */
@@ -102,7 +106,17 @@ check(abs($s['cost_usd'] - 0.025) < 1e-9, 'cost from a jump in the total');
 
 echo "rotation starts a fresh process\n";
 $oldPid = $parent->pid();
+$oldSid = nb_setting($pdo, 'parent_session_id');
+$before = count($inputs());
 $s = $run(['message' => 'x']); // parent_turns is 3 now, which is session_rotate_turns
+$sent = array_slice($inputs(), $before);
+check(count($sent) === 2 && str_contains($sent[0], 'write handoff.md') && str_contains($sent[0], 'about to start over'),
+    'first the old conversation is asked to write handoff.md');
+check(is_file($handoffFile) && trim((string)file_get_contents($handoffFile)) === "handoff from $oldSid",
+    'and writes it (the old session wrote it)');
+check(str_contains($sent[1], 'handoff.md') && str_contains($sent[1], 'CLAUDE.md'), "the new conversation's intro tells it to read handoff.md");
+$dbg = json_decode((string)file_get_contents($s['debug_file']), true);
+check($dbg['handoff'] === ['written' => true, 'error' => null], "the job's debug file records the handoff");
 check(count($spawns()) === 2 && $s['process'] === 'started' && $parent->pid() !== $oldPid, 'new process');
 check(!in_array('--resume', $args(), true) && str_contains($lastInput(), 'CLAUDE.md'), 'fresh session with the intro');
 check(nb_setting($pdo, 'parent_turns') === '1' && nb_setting($pdo, 'parent_session_id') !== $sid, 'turns reset, new session id');
@@ -226,5 +240,29 @@ check(!$parent->running() && $parent->stop() === null, 'stop is idempotent');
 
 echo "transcript path\n";
 check(nb_transcript_path(null) === null && nb_transcript_path('no-such-session') === null, 'missing transcript gives null');
+
+echo "handoff after a worker restart, and when it fails\n";
+$parent->stop();
+nb_setting_set($pdo, 'parent_turns', '99');
+$saved = nb_setting($pdo, 'parent_session_id');
+@unlink($handoffFile);
+$restarted = new NbParentProcess(); // a fresh worker: no process running
+$before = count($spawns());
+nb_job_enqueue($pdo, 'chat', ['message' => 'after restart']);
+nb_run_parent_job($pdo, nb_job_next($pdo), $config, $restarted);
+$newSpawns = array_slice($spawns(), $before);
+check(count($newSpawns) === 2 && $opt($newSpawns[0], '--resume') === $saved && !in_array('--resume', $newSpawns[1], true),
+    'the saved conversation is resumed just to write the note, then a fresh one starts');
+check(trim((string)@file_get_contents($handoffFile)) === "handoff from $saved", 'and the note is written');
+nb_setting_set($pdo, 'parent_turns', '99');
+$restarted->stop(); // the fake reads its switches when it starts
+putenv('NB_FAKE_HANDOFF_FAIL=1');
+nb_job_enqueue($pdo, 'chat', ['message' => 'when the note fails']);
+$s = nb_run_parent_job($pdo, nb_job_next($pdo), $config, $restarted);
+putenv('NB_FAKE_HANDOFF_FAIL');
+$dbg = json_decode((string)file_get_contents($s['debug_file']), true);
+check($s['ok'] && $dbg['handoff']['written'] === false && str_contains((string)$dbg['handoff']['error'], 'could not write'),
+    'a failed handoff is recorded, and the job still runs in a fresh conversation');
+$restarted->stop();
 
 finish();

@@ -52,6 +52,10 @@ while (true) {
     fwrite(STDERR, sprintf("[%s] job %d %s in %.1fs, %s turns, $%s (API-equivalent), agent process %s (pid %s)\n", nb_now(),
         $job['id'], $status, nb_clock() - $t, $s['turns'] ?? '?',
         isset($s['cost_usd']) ? number_format((float)$s['cost_usd'], 4) : '?', $s['process'], $s['pid'] ?? '?'));
+    if ($s['handoff'] ?? null) {
+        fwrite(STDERR, $s['handoff']['written'] ? "    conversation started over; the old one wrote handoff.md for it\n"
+            : "    conversation started over without a handoff note: {$s['handoff']['error']}\n");
+    }
     foreach ($s['denials'] as $d) {
         fwrite(STDERR, "    BLOCKED: $d\n");
     }

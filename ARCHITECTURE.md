@@ -12,7 +12,7 @@ How noize-buffet is built, for anyone changing it or debugging it. [README.md](R
 | `[agent]` | `php scripts/job_worker.php` | runs agent jobs one at a time |
 | `[mine]` | `php scripts/mine_worker.php` | mines queued videos' comments, `mining_workers` at a time |
 
-Ctrl+C sends SIGTERM to each group. `start.py --reset` finds this folder's leftover processes through `/proc` (the web server, the workers, `claude -p` processes, anything under `scripts/` or `mining/`, and `yt-dlp`), stops them, and deletes `data/`, `comments/`, `brief.md` and `taste.md` after a typed `RESET`.
+Ctrl+C sends SIGTERM to each group. `start.py --reset` finds this folder's leftover processes through `/proc` (the web server, the workers, `claude -p` processes, anything under `scripts/` or `mining/`, and `yt-dlp`), stops them, and deletes `data/`, `comments/`, `brief.md`, `taste.md` and `handoff.md` after a typed `RESET`.
 
 ## Database
 
@@ -37,7 +37,7 @@ Columns added after a table was created are added to older databases on start (`
 
 `scripts/job_worker.php` takes the oldest queued job and passes it to `nb_run_parent_job()` (`lib/parent.php`). When idle, it checks `nb_refill_check()` and queues a refill when `refill_when_left` or fewer songs are unplayed, unless the agent is busy, usage is paused, or the last two refills failed.
 
-The agent is one long-lived `claude -p --input-format stream-json --output-format stream-json` process (`NbParentProcess`, `lib/parent_process.php`), kept between jobs to skip Claude Code's start-up time. Each job is one JSON line on stdin; the reply is the event stream up to the `result` event. The process is replaced after `session_rotate_turns` jobs, after an error, and after a job runs past `job_timeout_s`; the next one starts fresh, or with `--resume` when a worker restart finds a saved session id. Durable memory is `brief.md`, `taste.md` and the database, not the conversation.
+The agent is one long-lived `claude -p --input-format stream-json --output-format stream-json` process (`NbParentProcess`, `lib/parent_process.php`), kept between jobs to skip Claude Code's start-up time. Each job is one JSON line on stdin; the reply is the event stream up to the `result` event. The process is replaced after `session_rotate_turns` jobs, after an error, and after a job runs past `job_timeout_s`; the next one starts fresh, or with `--resume` when a worker restart finds a saved session id. Before a rotation, `nb_write_handoff()` asks the old conversation (resumed if the worker restarted) to write `handoff.md`: recent topics, unfinished work, open questions, and anything to add to `taste.md` or `brief.md`. A new conversation's first prompt tells it to read `brief.md`, `taste.md` and `handoff.md`. A handoff that fails is recorded in the job's debug file and the rotation goes ahead. Durable memory is those files and the database, not the conversation.
 
 Its command line (`nb_parent_command()`):
 
@@ -149,7 +149,7 @@ Around each run, the runner:
 |---|---|
 | `start.py` | requirement checks, the three processes, `--reset` |
 | `CLAUDE.md` | the agent's rulebook |
-| `brief.md`, `taste.md` | the user's goal and the agent's notes (never committed) |
+| `brief.md`, `taste.md`, `handoff.md` | the user's goal, the agent's notes, and its note to its next conversation (never committed) |
 | `bin/nb.php` | the agent's database commands |
 | `lib/db.php` | database, locking, songs, listens, jobs, mining queue, leads, usage pause |
 | `lib/parent.php`, `lib/parent_process.php` | the agent's command, prompts, job runner, process |

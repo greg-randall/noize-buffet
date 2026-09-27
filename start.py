@@ -27,7 +27,7 @@ DEFAULT_PORT = 8000
 FALLBACK_PORTS = range(8001, 9000)
 FALLBACK_TRIES = 25
 # What --reset deletes: everything a run creates. .env and config.json are kept.
-RESET_PATHS = ["data", "brief.md", "taste.md", "comments"]
+RESET_PATHS = ["data", "brief.md", "taste.md", "handoff.md", "comments"]
 
 
 def report(ok, name, fix=""):

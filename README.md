@@ -68,7 +68,7 @@ Names that 2 or more different people mention, or that come up under 2 or more o
 
 ### Memory
 
-Claude's conversation starts over every 40 messages and after an error. What it knows about you lives in `brief.md`, `taste.md` and the database, and every new conversation starts by reading them. Anything you said that it didn't write down is forgotten. You can edit both files yourself; it treats your edits as things you said.
+Claude's conversation starts over every 40 messages, to stay quick. Before it does, the old conversation writes a short handoff note (`handoff.md`): what you've been talking about, anything it was in the middle of, and open questions. The new conversation reads that note along with `brief.md`, `taste.md` and the database. After an error there's no chance to write a note, so the new conversation uses the files and the last note. You can edit both files yourself; it treats your edits as things you said.
 
 ### What Claude can and can't do
 
