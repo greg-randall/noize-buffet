@@ -24,4 +24,15 @@ check(count($ex) === count(array_unique($ex)), 'no duplicate patterns');
 $noHome = nb_isolation_settings($work, '');
 check(!in_array('/.claude/CLAUDE.md', $noHome['claudeMdExcludes'], true) || in_array('/CLAUDE.md', $noHome['claudeMdExcludes'], true), 'works without HOME');
 
+$deny = $s['permissions']['deny'] ?? [];
+$env = realpath(nb_root()) . '/.env';
+check(in_array("Read(/$env)", $deny, true) && in_array("Edit(/$env)", $deny, true),
+    "reading or editing the repo's .env (the TypeSafe key) is denied, as an absolute //path rule");
+putenv('NB_ENV_FILE=' . tmp_dir() . '/iso/other.env');
+touch(tmp_dir() . '/iso/other.env');
+$other = nb_isolation_settings($work, '')['permissions']['deny'];
+check(in_array('Read(/' . realpath(tmp_dir() . '/iso/other.env') . ')', $other, true), 'and the NB_ENV_FILE one, when set');
+putenv('NB_ENV_FILE');
+check(count($deny) === count(array_unique($deny)), 'no duplicate deny rules');
+
 finish();

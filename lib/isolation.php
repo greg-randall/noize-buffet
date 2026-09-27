@@ -33,5 +33,27 @@ function nb_isolation_settings(string $workDir, ?string $home = null): array
         'claudeMdExcludes' => array_values(array_unique($excludes)),
         'disableAllHooks' => true,
         'autoMemoryEnabled' => false,
+        'permissions' => ['deny' => nb_secret_deny_rules()],
     ];
+}
+
+/**
+ * Deny rules for the files holding secrets: the .env with the TypeSafe key (and NB_ENV_FILE's, if set).
+ * The parent may read anything in the repo, and reads YouTube comments written by strangers; a comment that talked it
+ * into reading .env could then send the key out with WebFetch. A deny rule holds whatever the agent is told.
+ */
+function nb_secret_deny_rules(): array
+{
+    $files = [dirname(__DIR__) . '/.env'];
+    if (getenv('NB_ENV_FILE')) {
+        $files[] = (string)getenv('NB_ENV_FILE');
+    }
+    $rules = [];
+    foreach ($files as $f) {
+        $real = realpath($f) ?: $f; // "//" + an absolute path is how a permission rule names one
+        foreach (['Read', 'Edit'] as $tool) {
+            $rules[] = "$tool(/" . '/' . ltrim($real, '/') . ')';
+        }
+    }
+    return array_values(array_unique($rules));
 }
