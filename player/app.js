@@ -319,6 +319,32 @@ function renderAgentStatus() {
   $bubble.find('.activity-text').text(`${doing}…${timer}`);
 }
 
+// ---------- comment mining ----------
+
+// The "Comment mining" panel under the playlist, and "mining 1 running, 3 queued" in the navbar.
+function renderMining(res) {
+  const vids = res.videos;
+  const active = vids.filter(v => ['downloading', 'filtering', 'extracting'].includes(v.status)).length;
+  const queued = vids.filter(v => v.status === 'queued').length;
+  $('#mining-status').toggleClass('d-none', !active && !queued).text(`mining ${active} running, ${queued} queued`);
+  $('#mining-summary').text(`${vids.length} songs, ${res.leads.confirmed} confirmed leads, ${res.leads.hints} hints`);
+  const $tb = $('#mining-list').empty();
+  vids.forEach(v => {
+    const filter = v.filter === 'keyword' ? 'keywords (no TypeSafe key)' : (v.filter || '');
+    $('<tr>').append(
+      $('<td>').text(v.artist ? `${v.artist} - ${v.title}` : v.video_id), $('<td>').text(v.status),
+      $('<td>').text(filter), $('<td>').text(v.comments ?? ''), $('<td>').text(v.flagged ?? ''),
+      $('<td>').text(v.covered ?? ''), $('<td>').text(v.mentions ?? ''),
+      $('<td class="text-warning">').text(v.error || '')).appendTo($tb);
+  });
+}
+
+function pollMining() {
+  $.getJSON('api.php', {action: 'mining'})
+    .done(res => { renderMining(res); setTimeout(pollMining, 5000); })
+    .fail(xhr => { connError('mining status', xhr); setTimeout(pollMining, 10000); });
+}
+
 // ---------- wiring ----------
 
 $(function () {
@@ -328,6 +354,7 @@ $(function () {
     .fail(xhr => connError('starting up', xhr));
   refreshQueue(true);
   pollChat();
+  pollMining();
   setInterval(renderAgentStatus, 1000);
   setInterval(poll, 1000);
 

@@ -73,6 +73,11 @@ try {
             });
             respond(['ok' => true, 'started' => $empty]);
 
+        case 'mining':
+            $strengths = array_count_values(array_column(nb_leads($pdo), 'strength'));
+            respond(['videos' => nb_mining_list($pdo),
+                'leads' => ['confirmed' => $strengths['confirmed'] ?? 0, 'hints' => $strengths['hint'] ?? 0]]);
+
         default:
             respond(['ok' => false, 'error' => 'unknown action'], 400);
     }

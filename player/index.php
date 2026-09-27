@@ -34,6 +34,7 @@
     <span class="navbar-brand">noize-buffet</span>
     <span id="position" class="text-secondary"></span>
     <span id="agent-status" class="badge text-bg-info d-none">agent working…</span>
+    <span id="mining-status" class="badge text-bg-secondary d-none"></span>
     <span id="conn-status" class="badge text-bg-danger d-none"></span>
     <span id="save-status" class="badge text-bg-secondary ms-auto">idle</span>
   </div>
@@ -95,6 +96,17 @@
           <tbody id="queue-list"></tbody>
         </table>
       </div>
+
+      <details id="mining-panel" class="mt-3">
+        <summary class="h6">Comment mining <span id="mining-summary" class="small text-body-secondary"></span></summary>
+        <div class="small text-body-secondary mb-1">Songs you rate top or yes, and songs you name, get their YouTube comments read for other artists people mention.</div>
+        <div class="table-responsive">
+          <table class="table table-sm small mb-0">
+            <thead><tr><th>Song</th><th>Status</th><th>Filter</th><th>Comments</th><th>Flagged</th><th>Covered</th><th>Mentions</th><th>Problems</th></tr></thead>
+            <tbody id="mining-list"></tbody>
+          </table>
+        </div>
+      </details>
     </div>
 
     <div class="col-xl-4" id="chat-col">
