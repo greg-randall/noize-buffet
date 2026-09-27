@@ -7,6 +7,7 @@ const NB_CONFIG_DEFAULTS = [
     'parent_model' => 'sonnet',
     'session_rotate_turns' => 40,
     'job_timeout_s' => 600, // give up on a job (and restart the agent process) after this long
+    'yt_search_parallel' => 4, // YouTube searches run at the same time when the agent looks up a batch's songs
     'memory_picks' => 2, // most songs per batch the agent may pick from its own memory rather than research
     'refill_when_left' => 5, // queue a new batch automatically when this many unplayed songs are left; 0 = off
     'mining_workers' => 2, // videos mined at the same time

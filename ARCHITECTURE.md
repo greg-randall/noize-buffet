@@ -135,6 +135,7 @@ Around each run, the runner:
 | `memory_picks` | 2 | most songs per batch picked from memory rather than research |
 | `refill_when_left` | 5 | queue a batch automatically at this many unplayed songs; 0 turns it off |
 | `mining_workers` | 2 | videos mined at once |
+| `yt_search_parallel` | 4 | YouTube searches run at the same time when the agent looks up songs |
 | `mining_comment_cap` | 3000 | top comments downloaded per video |
 | `mining_chunk_size` | 150 | flagged comments per Haiku child |
 | `mining_child_model` | `haiku` | the children's model |
