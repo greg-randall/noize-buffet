@@ -58,6 +58,23 @@ check($code === 0 && $r['ok'] === true && end($said)['role'] === 'parent' && end
 [$code, $r] = nb_cli($cli, ['say']);
 check($code === 2 && $r['ok'] === false, 'say without text rejected');
 
+nb_leads_replace($pdo, [
+    ['name_key' => 'burial', 'name' => 'Burial', 'strength' => 'confirmed', 'people' => 2, 'videos' => 1, 'mentions' => 2,
+        'likes' => 55, 'unsure_only' => false, 'songs' => ['Archangel' => 1], 'video_ids' => ['AAAAAAAAAAA'],
+        'examples' => [['author' => '@ann', 'likes' => 50, 'text' => 'check out Burial'], ['author' => '@bob', 'likes' => 5, 'text' => 'Burial!']]],
+    ['name_key' => 'someband', 'name' => 'Some Band', 'strength' => 'hint', 'people' => 1, 'videos' => 1, 'mentions' => 1,
+        'likes' => 1, 'unsure_only' => false, 'songs' => [], 'video_ids' => ['AAAAAAAAAAA'], 'examples' => [['author' => '@c', 'likes' => 1, 'text' => 'Some Band vibes']]],
+]);
+[$code, $leads] = nb_cli($cli, ['leads']);
+check($code === 0 && array_column($leads, 'name') === ['Burial', 'Some Band'] && $leads[0]['top_comment'] === 'check out Burial', 'leads lists every lead, confirmed first');
+check($leads[1]['muted'] === true && $leads[0]['muted'] === false, 'muted artists are marked (Some Band was muted above)');
+[$code, $one] = nb_cli($cli, ['lead', 'burial']);
+check($code === 0 && count($one['examples']) === 2, 'lead shows every comment behind one lead');
+[$code, $none] = nb_cli($cli, ['lead', 'Nobody', 'At', 'All']);
+check($code === 2 && $none['ok'] === false, 'unknown lead rejected');
+[$code, $st] = nb_cli($cli, ['status']);
+check($code === 0 && array_key_exists('mining', $st), 'status includes mining counts');
+
 // The agent process outlives any one job, so without NB_JOB_ID the CLI uses the running job.
 nb_job_enqueue($pdo, 'chat', ['message' => 'x']);
 $running = nb_job_next($pdo);

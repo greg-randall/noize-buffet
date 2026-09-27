@@ -123,6 +123,8 @@ function nb_activity_text(string $tool, array $input): ?string
                     'add-batch' => 'Adding songs to your queue',
                     'note' => 'Saving your note on this song',
                     'set' => "Updating the song's rating",
+                    'leads' => 'Checking leads from YouTube comments',
+                    'lead' => 'Checking leads from YouTube comments',
                     'mute' => 'Updating what to avoid',
                     'mutes' => 'Checking what to avoid',
                     'say' => null, // the message itself shows up in the chat

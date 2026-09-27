@@ -138,6 +138,7 @@ check(nb_activity_text('Read', ['file_path' => '/x/taste.md']) === 'Reading your
 check(nb_activity_text('Write', ['file_path' => 'data/pending-batch.json']) === 'Putting the batch together', 'writing the batch');
 check(nb_activity_text('WebFetch', ['url' => 'https://example.bandcamp.com/album/x']) === 'Reading example.bandcamp.com', 'web fetch shows the site');
 check(nb_activity_text('WebSearch', ['query' => 'hyperpop cheer']) === 'Searching the web: hyperpop cheer', 'web search shows the query');
+check(nb_activity_text('Bash', ['command' => 'php bin/nb.php leads']) === 'Checking leads from YouTube comments', 'leads activity');
 
 echo "worker restart resumes the saved session\n";
 $parent->stop();

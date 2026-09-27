@@ -18,6 +18,8 @@ const NB_USAGE = [
     'set <video_id> [rating=top|yes|good|ok|meh|no] [new_to_me=1|0|unknown] [off_brief=1|0]' =>
         "set a song's rating and toggles from what the user said about it",
     'say <text>' => 'post a short message to the user right now, while you keep working (e.g. before a long batch)',
+    'leads' => 'artists named in the YouTube comments of songs they loved, strongest first (confirmed, then hints)',
+    'lead <name>' => 'one lead with every comment behind it',
 ];
 
 /** Print the JSON result, append the call to data/nb.log (one JSON object per line), and exit. */
@@ -111,6 +113,26 @@ try {
             $jobId = nb_cli_job_id($pdo);
             out(['ok' => true, 'id' => nb_chat_add($pdo, 'parent', $text, $jobId)]);
 
+        case 'leads':
+            // Keys computed here in PHP from the names (Python's name_key only groups names in merge_leads.py).
+            $muted = array_map(fn($m) => nb_name_key((string)$m['value']),
+                array_filter(nb_mutes($pdo), fn($m) => $m['kind'] === 'artist'));
+            $queued = array_flip(array_map(fn($s) => nb_name_key((string)$s['artist']), nb_queue($pdo)));
+            out(array_map(fn($l) => [
+                'name' => $l['name'], 'strength' => $l['strength'], 'people' => $l['people'], 'videos' => $l['videos'],
+                'mentions' => $l['mentions'], 'likes' => $l['likes'], 'unsure_only' => (bool)$l['unsure_only'],
+                'songs' => $l['songs'], 'already_in_queue' => isset($queued[nb_name_key($l['name'])]),
+                'muted' => in_array(nb_name_key($l['name']), $muted, true), 'top_comment' => $l['examples'][0]['text'] ?? '',
+            ], nb_leads($pdo)));
+
+        case 'lead':
+            $key = nb_name_key(implode(' ', array_slice($argv, 2)));
+            $match = array_values(array_filter(nb_leads($pdo), fn($l) => nb_name_key($l['name']) === $key));
+            if ($match === []) {
+                out(['ok' => false, 'error' => 'no lead with that name; see php bin/nb.php leads'], 2);
+            }
+            out($match[0]);
+
         case 'mutes':
             out(nb_mutes($pdo));
 
@@ -121,6 +143,7 @@ try {
                 'rated' => (int)$pdo->query('SELECT COUNT(*) FROM listens WHERE rating IS NOT NULL')->fetchColumn(),
                 'last_batch_at' => nb_last_batch_at($pdo),
                 'jobs' => nb_job_status($pdo),
+                'mining' => array_count_values(array_column(nb_mining_list($pdo), 'status')),
             ]));
 
         default:
