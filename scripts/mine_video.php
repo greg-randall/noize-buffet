@@ -265,3 +265,15 @@ try {
 } catch (Throwable $e) {
     $fail(get_class($e) . ': ' . $e->getMessage());
 }
+
+// 7. Prework for the next batch: YouTube links and view counts for the strongest leads, so the agent can use them
+// without searching. Best effort: the video is already done, and a failure here only costs the agent a search.
+try {
+    $lk = nb_lookup_leads($pdo, $config, $log);
+    if ($lk['looked_up'] || $lk['failed'] || $lk['error']) {
+        $say("looked up YouTube links for {$lk['looked_up']} leads" . ($lk['failed'] ? ", {$lk['failed']} searches failed" : '')
+            . ($lk['error'] ? "; {$lk['error']}" : ''));
+    }
+} catch (Throwable $e) {
+    $say('looking up YouTube links for leads failed: ' . get_class($e) . ': ' . $e->getMessage());
+}

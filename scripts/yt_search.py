@@ -8,6 +8,7 @@ Output with several queries: {"query": [results...], ...} in the order given. Se
 """
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -53,7 +54,7 @@ def parse_lines(text):
 
 
 def search(query, n):
-    cmd = ["yt-dlp", "--flat-playlist", "--print", FIELDS, f"ytsearch{n}:{query}"]
+    cmd = [os.environ.get("NB_YTDLP_BIN") or "yt-dlp", "--flat-playlist", "--print", FIELDS, f"ytsearch{n}:{query}"]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
     if proc.returncode != 0 and not proc.stdout.strip():
         raise RuntimeError(proc.stderr.strip() or f"yt-dlp exited {proc.returncode}")

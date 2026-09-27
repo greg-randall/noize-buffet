@@ -43,6 +43,17 @@ function out(mixed $data, int $code = 0): never
 }
 
 /** The job this call belongs to: NB_JOB_ID if set, else the running job (the agent process outlives any one job). */
+/** A lead's saved YouTube lookup, trimmed for the leads list: the query, max_views and the top 3 results. */
+function nb_lead_youtube_brief(?array $yt): ?array
+{
+    if ($yt === null) {
+        return null;
+    }
+    return ['query' => $yt['query'], 'max_views' => $yt['max_views'], 'results' => array_map(
+        fn($v) => array_intersect_key($v, array_flip(['video_id', 'title', 'channel', 'duration_s', 'views'])),
+        array_slice($yt['results'], 0, 3))];
+}
+
 function nb_cli_job_id(PDO $pdo): ?int
 {
     if (getenv('NB_JOB_ID')) {
@@ -118,11 +129,13 @@ try {
             $muted = array_map(fn($m) => nb_name_key((string)$m['value']),
                 array_filter(nb_mutes($pdo), fn($m) => $m['kind'] === 'artist'));
             $queued = array_flip(array_map(fn($s) => nb_name_key((string)$s['artist']), nb_queue($pdo)));
+            $yt = nb_lead_youtube_all($pdo);
             out(array_map(fn($l) => [
                 'name' => $l['name'], 'strength' => $l['strength'], 'people' => $l['people'], 'videos' => $l['videos'],
                 'mentions' => $l['mentions'], 'likes' => $l['likes'], 'unsure_only' => (bool)$l['unsure_only'],
                 'songs' => $l['songs'], 'already_in_queue' => isset($queued[nb_name_key($l['name'])]),
                 'muted' => in_array(nb_name_key($l['name']), $muted, true), 'top_comment' => $l['examples'][0]['text'] ?? '',
+                'youtube' => nb_lead_youtube_brief($yt[nb_name_key($l['name'])] ?? null),
             ], nb_leads($pdo)));
 
         case 'lead':
@@ -131,7 +144,7 @@ try {
             if ($match === []) {
                 out(['ok' => false, 'error' => 'no lead with that name; see php bin/nb.php leads'], 2);
             }
-            out($match[0]);
+            out($match[0] + ['youtube' => nb_lead_youtube_all($pdo)[$key] ?? null]);
 
         case 'mutes':
             out(nb_mutes($pdo));

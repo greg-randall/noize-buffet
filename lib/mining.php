@@ -579,3 +579,67 @@ function nb_coverage(string $dir, bool $writeExtra, string $logFile, float $time
     }
     return $cov;
 }
+
+/** What to search YouTube for, for a lead: the artist with their most-named song, or the artist alone. */
+function nb_lead_query(array $lead): string
+{
+    $song = (string)(array_key_first($lead['songs'] ?? []) ?? ''); // (string): PHP turns a key like "1999" into an int
+    return trim($lead['name'] . ($song !== '' ? " $song" : ''));
+}
+
+/**
+ * Prework for the next batch: search YouTube for the strongest leads (up to lead_lookup_max per call) that have no
+ * saved results for their current query, skipping muted artists and artists already in the queue. Saves the results
+ * and max_views: the most views among results whose title or channel has the artist's name (null if none do), the
+ * number the agent's hint rule needs. Returns ['looked_up' => n, 'failed' => n, 'error' => ?string].
+ */
+function nb_lookup_leads(PDO $pdo, array $config, string $logFile): array
+{
+    $done = ['looked_up' => 0, 'failed' => 0, 'error' => null];
+    $max = (int)($config['lead_lookup_max'] ?? 0);
+    if ($max <= 0) {
+        return $done;
+    }
+    $saved = nb_lead_youtube_all($pdo);
+    $skip = array_flip(array_merge(
+        array_map(fn($m) => nb_name_key((string)$m['value']), array_filter(nb_mutes($pdo), fn($m) => $m['kind'] === 'artist')),
+        array_map(fn($s) => nb_name_key((string)$s['artist']), nb_queue($pdo))));
+    $todo = []; // name key => [name, query]
+    foreach (nb_leads($pdo) as $lead) { // strongest first
+        $key = nb_name_key($lead['name']);
+        $query = nb_lead_query($lead);
+        if ($key === '' || isset($skip[$key]) || ($saved[$key]['query'] ?? null) === $query) {
+            continue;
+        }
+        $todo[$key] = [$lead['name'], $query];
+        if (count($todo) >= $max) {
+            break;
+        }
+    }
+    if (!$todo) {
+        return $done;
+    }
+    $python = getenv('NB_PYTHON_BIN') ?: (nb_find_bin('python3') ?? 'python3');
+    $queries = array_values(array_unique(array_column($todo, 1)));
+    $r = nb_run_logged(array_merge([$python, nb_root() . '/scripts/yt_search.py'], $queries, ['-n', '5']),
+        nb_root(), $logFile, 900.0);
+    $out = json_decode(trim($r['out']), true);
+    if (!is_array($out)) {
+        return ['error' => 'yt_search.py gave no results' . ($r['timed_out'] ? ' (timed out)' : " (exit {$r['exit']})")] + $done;
+    }
+    if (count($queries) === 1) {
+        $out = [$queries[0] => $out]; // one query: yt_search.py prints the list alone
+    }
+    foreach ($todo as $key => [$name, $query]) {
+        $results = $out[$query] ?? null;
+        if (!is_array($results) || !array_is_list($results)) { // {"error": ...}: tried again after the next video
+            $done['failed']++;
+            continue;
+        }
+        $views = array_filter(array_map(fn($v) => str_contains(nb_name_key($v['title'] . ' ' . $v['channel']), $key)
+            ? $v['views'] : null, $results), 'is_int');
+        nb_lead_youtube_save($pdo, (string)$key, $query, $results, $views ? max($views) : null);
+        $done['looked_up']++;
+    }
+    return $done;
+}

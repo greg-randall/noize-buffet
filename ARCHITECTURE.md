@@ -30,6 +30,7 @@ One SQLite file, `data/music.sqlite` (`NB_DB` overrides it; the tests use this).
 | `settings` | key/value: the agent's session id, its current activity, the usage pause |
 | `mining` | per video: status (queued, downloading, filtering, extracting, done, failed), filter used, counts, notes, error |
 | `leads` | the merged leads, replaced after each mined video |
+| `lead_youtube` | per lead (by `nb_name_key()`): the YouTube search looked up for it, its results and `max_views`; kept across merges |
 
 Columns added after a table was created are added to older databases on start (`nb_create_tables()`).
 
@@ -80,6 +81,7 @@ Rating a song top or yes (`nb_save_listen()`), or adding it with bucket `user`, 
 4. **Extract** (`extracting`): one Haiku child per chunk (below) writes `artists.chunk-NN.md`, one line per name: `- [c12] Burial`, `- [c13] Daft Punk — "Get Lucky"`, `- [c14] Two Shell [own artist]`, `- [c16] none`.
 5. **Coverage**: `mining/coverage.py` checks every `[cN]` got a line, and writes the missed ones to `chunk-extra.md` for one re-run. Comments still missed are recorded as a problem; the video still finishes.
 6. **Merge**: under `comments/merge.lock`, `mining/merge_leads.py --only <finished videos>` merges every finished video into leads, and `nb_leads_replace()` swaps the `leads` table. Only `done` videos are merged, so a failed or half-mined folder never becomes leads.
+7. **Look up leads** (after `done`, best effort): `nb_lookup_leads()` runs `scripts/yt_search.py` for up to `lead_lookup_max` of the strongest leads with no saved results for their current search (the most-named song with the artist, or the artist alone), skipping muted artists and artists already in the queue. Results go in `lead_youtube`, with `max_views`: the most views among results whose title or channel has the artist's name. `nb.php leads` shows them in each lead's `youtube` field, so the agent needn't search for lead picks. A failed search is retried after the next mined video.
 
 ### TypeSafe questions
 
@@ -135,6 +137,7 @@ Around each run, the runner:
 | `memory_picks` | 2 | most songs per batch picked from memory rather than research |
 | `refill_when_left` | 5 | queue a batch automatically at this many unplayed songs; 0 turns it off |
 | `mining_workers` | 2 | videos mined at once |
+| `lead_lookup_max` | 20 | after mining a song, YouTube lookups for up to this many leads without one; 0 = off |
 | `yt_search_parallel` | 4 | YouTube searches run at the same time when the agent looks up songs |
 | `mining_comment_cap` | 3000 | top comments downloaded per video |
 | `mining_chunk_size` | 150 | flagged comments per Haiku child |

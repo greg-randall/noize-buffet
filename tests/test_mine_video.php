@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require __DIR__ . '/../lib/db.php';
+require __DIR__ . '/../lib/mining.php';
 require __DIR__ . '/assert.php';
 
 $pdo = fresh_db('test_mine_video'); // exports NB_DB for the child processes
@@ -222,5 +223,46 @@ nb_mining_enqueue($pdo, 'V0000000012');
 $names = array_column(nb_leads($pdo), 'name_key');
 check($code === 0 && !in_array('ghostband', $names, true), "a folder that didn't finish mining is never merged into the leads");
 check(in_array('burial', $names, true), 'the finished videos still are');
+
+echo "prework: YouTube links for leads\n";
+$searches = fn() => array_values(array_filter($calls(), fn($c) => str_starts_with((string)end($c['args']), 'ytsearch')));
+$yt = nb_lead_youtube_all($pdo);
+check(($yt['burial']['query'] ?? '') === 'Burial' && ($yt['burial']['results'][0]['title'] ?? '') === 'Burial (Official Video)'
+    && $yt['burial']['max_views'] === 1234, 'after mining, the leads are looked up on YouTube, with their views');
+check(nb_lead_query(['name' => 'Burial', 'songs' => ['Archangel' => 2, 'Near Dark' => 1]]) === 'Burial Archangel'
+    && nb_lead_query(['name' => 'Tomggg', 'songs' => []]) === 'Tomggg', "a lead's search is its most-named song, or its name alone");
+check(!isset($yt['testartist']) && !isset($yt['ghostband']), "the video's own artist (already in the queue) isn't looked up");
+$leadsOut = json_decode((string)shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/../bin/nb.php') . ' leads'), true);
+$burial = array_values(array_filter($leadsOut, fn($l) => $l['name'] === 'Burial'))[0] ?? [];
+check(($burial['youtube']['max_views'] ?? null) === 1234 && count($burial['youtube']['results'] ?? []) === 1
+    && isset($burial['youtube']['results'][0]['video_id']) && !isset($burial['youtube']['results'][0]['url']),
+    'nb.php leads shows the saved results, trimmed');
+$before = count($searches());
+$log = tmp_dir() . '/lookup.log';
+check(nb_lookup_leads($pdo, ['lead_lookup_max' => 20], $log) === ['looked_up' => 0, 'failed' => 0, 'error' => null]
+    && count($searches()) === $before, 'leads already looked up with the same query are not searched again');
+
+nb_leads_replace($pdo, array_merge(...array_map(fn($n) => [['name_key' => nb_name_key($n), 'name' => $n,
+    'strength' => 'hint', 'people' => 1, 'videos' => 1, 'mentions' => 1, 'likes' => 0, 'songs' => [], 'video_ids' => [], 'examples' => []]],
+    ['Aaa One', 'Bbb Two', 'Ccc Three', 'Muted Band'])));
+nb_mute_add($pdo, 'artist', 'Muted Band');
+putenv('NB_FAKE_YT_VIEWS=25000000');
+$lk = nb_lookup_leads($pdo, ['lead_lookup_max' => 2], $log);
+$yt = nb_lead_youtube_all($pdo);
+check($lk['looked_up'] === 2 && isset($yt['aaaone'], $yt['bbbtwo']) && !isset($yt['cccthree']), 'lead_lookup_max caps the searches per run, strongest first');
+check($yt['aaaone']['max_views'] === 25000000, 'views are saved for the hint rule');
+$lk = nb_lookup_leads($pdo, ['lead_lookup_max' => 20], $log);
+check($lk['looked_up'] === 1 && !isset(nb_lead_youtube_all($pdo)['mutedband']), "the next run does the rest; a muted artist isn't searched");
+check(nb_lookup_leads($pdo, ['lead_lookup_max' => 0], $log)['looked_up'] === 0, 'lead_lookup_max 0 turns it off');
+putenv('NB_FAKE_YT_VIEWS');
+
+nb_leads_replace($pdo, [['name_key' => 'ddd', 'name' => 'Ddd', 'strength' => 'confirmed', 'people' => 2, 'videos' => 1,
+    'mentions' => 2, 'likes' => 0, 'songs' => ['1999' => 2], 'video_ids' => [], 'examples' => []]]);
+putenv('NB_FAKE_YTSEARCH_FAIL=1');
+$lk = nb_lookup_leads($pdo, ['lead_lookup_max' => 20], $log);
+putenv('NB_FAKE_YTSEARCH_FAIL');
+check($lk['looked_up'] === 0 && $lk['failed'] === 1 && !isset(nb_lead_youtube_all($pdo)['ddd']), 'a failed search is counted and not saved');
+$lk = nb_lookup_leads($pdo, ['lead_lookup_max' => 20], $log);
+check($lk['looked_up'] === 1 && nb_lead_youtube_all($pdo)['ddd']['query'] === 'Ddd 1999', '...so the next run tries it again (a song named "1999" too)');
 
 finish();

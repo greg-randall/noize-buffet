@@ -12,6 +12,7 @@ const NB_CONFIG_DEFAULTS = [
     'refill_when_left' => 5, // queue a new batch automatically when this many unplayed songs are left; 0 = off
     'mining_workers' => 2, // videos mined at the same time
     'mining_comment_cap' => 3000, // top comments downloaded per video
+    'lead_lookup_max' => 20, // after mining a song, look up YouTube links for up to this many new leads; 0 = off
     'mining_chunk_size' => 150, // flagged comments per extraction child
     'mining_child_model' => 'haiku',
     'mining_child_timeout_s' => 600, // kill an extraction child after this long

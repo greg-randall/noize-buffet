@@ -86,6 +86,10 @@ function nb_create_tables(PDO $pdo): void
             people INTEGER NOT NULL, videos INTEGER NOT NULL, mentions INTEGER NOT NULL, likes INTEGER NOT NULL,
             unsure_only INTEGER NOT NULL, songs_json TEXT NOT NULL, video_ids_json TEXT NOT NULL,
             examples_json TEXT NOT NULL, updated_at TEXT NOT NULL)',
+        // YouTube search results for leads, looked up after mining so a batch needn't search (kept across merges)
+        'CREATE TABLE IF NOT EXISTS lead_youtube (
+            name_key TEXT PRIMARY KEY, query TEXT NOT NULL, results_json TEXT NOT NULL, max_views INTEGER,
+            looked_up_at TEXT NOT NULL)',
     ] as $sql) {
         $pdo->exec($sql);
     }
@@ -653,6 +657,24 @@ function nb_leads(PDO $pdo): array
         }
         return $r;
     }, $rows);
+}
+
+/** Every lead's saved YouTube lookup, by nb_name_key() of its name: query, results, max_views, looked_up_at. */
+function nb_lead_youtube_all(PDO $pdo): array
+{
+    $out = [];
+    foreach (nb_locked($pdo, fn() => $pdo->query('SELECT * FROM lead_youtube')->fetchAll()) as $r) {
+        $out[$r['name_key']] = ['query' => $r['query'], 'max_views' => $r['max_views'] === null ? null : (int)$r['max_views'],
+            'results' => json_decode((string)$r['results_json'], true), 'looked_up_at' => $r['looked_up_at']];
+    }
+    return $out;
+}
+
+function nb_lead_youtube_save(PDO $pdo, string $key, string $query, array $results, ?int $maxViews): void
+{
+    $json = json_encode($results, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR);
+    nb_write($pdo, fn() => $pdo->prepare('INSERT OR REPLACE INTO lead_youtube (name_key, query, results_json, max_views,
+        looked_up_at) VALUES (?, ?, ?, ?, ?)')->execute([$key, $query, $json, $maxViews, nb_now()]));
 }
 
 /**
