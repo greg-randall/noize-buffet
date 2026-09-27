@@ -484,6 +484,12 @@ else:
           and "Real comments at or above 0.5: 0 " in report,
           "and how the injection question did on attacks and real comments")
     check("| 0.1 | " in report and "at 0.9: 0 real comments" in report, "a row per threshold, and the spam counts")
+    never = next(c for c in fixture if not c["haiku_mentions"] and not c.get("attack"))
+    row = next(f for f in fake if f["comment_id"] == never["comment_id"])
+    row.update(p_artist=0.95, p_other_artist=0.05)
+    report = tx.analyze(fake, fixture, fmm.DEFAULT_THRESHOLDS)
+    check("never checked by Haiku (" in report and repr(never["text"][:140]) in report,
+          "comments skipped without a Haiku answer to check are listed, with their text, to read")
     check(tx.names_other_artist(['Taylor Swift', 'Sleigh Bells [own artist]'])
           and not tx.names_other_artist(['Sleigh Bells [own artist]', '"Kids"', 'none']),
           "song-only and own-artist lines don't count as another artist")

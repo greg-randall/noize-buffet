@@ -101,6 +101,13 @@ def analyze(rows: list, comments: list, t: dict) -> str:
                    f"{c['haiku_mentions']} | {c['text'][:120]!r}")
     out.append(f"\nHighest threshold with no lost lead: {safe if safe is not None else 'none of them'} "
                f"(current: {t['other_artist']}).\n")
+    # Comments never sent to Haiku when the fixture was made have no answer to check against: read them.
+    unchecked = [c for c in named if not c["haiku_mentions"] and classify(by_id[c["comment_id"]], t) == "own_artist"]
+    out.append(f"Skipped at {t['other_artist']} but never checked by Haiku ({len(unchecked)}; read these for "
+               f"another artist's name):")
+    for c in sorted(unchecked, key=lambda c: -by_id[c["comment_id"]]["p_other_artist"]):
+        out.append(f"- p={by_id[c['comment_id']]['p_other_artist']:.2f} [{c['video_channel']}] {c['text'][:140]!r}")
+    out.append("")
 
     # Instructions to an AI.
     p_ai = sorted(((by_id[c["comment_id"]]["p_instructs_ai"], c["text"]) for c in real), reverse=True)

@@ -302,5 +302,42 @@ for i, lead in enumerate(result["leads"][:10], 1):
 for s in result["songs_only"]:
     print(f"  info    song without an artist: {s['name']} (mentions={s['mentions']} likes={s['likes']})")
 
+print("TypeSafe's real answers (tests/fixtures/mining/typesafe_answers.jsonl, from mining/typesafe_experiment.py)")
+answers_path = HERE / "fixtures" / "mining" / "typesafe_answers.jsonl"
+try:
+    import find_music_mentions as fmm  # noqa: E402
+    import typesafe_experiment as tx  # noqa: E402
+except ImportError as e:
+    fmm = None
+    print(f"  skip  TypeSafe answers (missing package {e.name}; python3 -m pip install -r requirements.txt)")
+if fmm and not answers_path.exists():
+    print("  skip  TypeSafe answers: no saved answers yet (copy data/typesafe-experiment.jsonl there)")
+elif fmm:
+    answers = {}
+    for line in answers_path.read_text(encoding="utf-8").splitlines():
+        row = json.loads(line)
+        if all(k in row for k in fmm.P_FIELDS.values()):
+            answers[row["comment_id"]] = row
+    fixture = tx.load_fixture()
+    t = fmm.DEFAULT_THRESHOLDS
+    missing = [c["comment_id"] for c in fixture if c["comment_id"] not in answers]
+    check(not missing, f"every fixture comment and made-up attack has a saved answer ({len(missing)} missing)")
+    got = {c["comment_id"]: fmm.classify(answers[c["comment_id"]], t) for c in fixture if c["comment_id"] in answers}
+    attacks = [c for c in fixture if c.get("attack")]
+    real = [c for c in fixture if not c.get("attack") and c["comment_id"] in got]
+    missed = [c["text"] for c in attacks if got.get(c["comment_id"]) != "quarantine"]
+    check(not missed, f"every made-up attack is quarantined at {t['instructs_ai']}", missed)
+    wrongly = [c["text"] for c in real if got[c["comment_id"]] == "quarantine"]
+    check(not wrongly, "no real comment is quarantined", wrongly)
+    spam = [c["text"] for c in real if got[c["comment_id"]] == "spam"]
+    check(not spam, f"no real comment is skipped as spam at {t['spam']}", spam)
+    lost = [c["text"] for c in real
+            if got[c["comment_id"]] == "own_artist" and tx.names_other_artist(c["haiku_mentions"])]
+    check(not lost, f"no comment Haiku found another artist in is skipped as own-artist-only at {t['other_artist']}",
+          lost)
+    counts = Counter(got[c["comment_id"]] for c in real)
+    print(f"  info    real comments: {counts['flag']} sent to Haiku, {counts['own_artist']} own artist only, "
+          f"{counts['spam']} spam, {counts['quarantine']} quarantined, {counts['none']} name no music")
+
 print("ALL PASSED" if fails == 0 else f"FAILED {fails}")
 sys.exit(1 if fails else 0)
