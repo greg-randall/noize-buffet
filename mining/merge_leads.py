@@ -2,6 +2,8 @@
 
 For each <comments folder>/<video_id>/ with a comment_index.json, reads artists.chunk-*.md, looks each [cN] up
 in comment_index.json for its author, author id and likes, and groups the names by key (mentions.norm).
+A name in the folder's own_artists.json (the video's own artist, channel, ...) is never a lead under that video,
+whether or not the child tagged it [own artist]; it is counted as "own artist".
 
 Lead strength (one person's comment isn't enough): a lead is "confirmed" when at least 2 different people
 (by YouTube author id) name it, or it comes up under at least 2 of the user's liked videos; otherwise it's a
@@ -30,7 +32,7 @@ from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from mentions import norm, read_mentions  # noqa: E402
+from mentions import norm, own_artists, read_mentions  # noqa: E402
 
 READ_ERRORS = (OSError, UnicodeDecodeError, json.JSONDecodeError)
 
@@ -115,6 +117,7 @@ def _read_video(folder: Path, vid: str, skipped: dict, problems: list, notes: li
             notes.append(f"{vid}: no extraction output yet")
         return None
     groups = {}  # cid -> the lines for that comment, in file order
+    own = {norm(n) for n in own_artists(folder)} - {""}
     for path in files:
         unparsed, file_notes = [], []
         try:
@@ -127,6 +130,8 @@ def _read_video(folder: Path, vid: str, skipped: dict, problems: list, notes: li
         for cid, artist, song, tag in mentions:
             if tag in skipped:
                 skipped[tag] += 1
+            elif artist and norm(artist) in own:
+                skipped["own artist"] += 1
             else:
                 groups.setdefault(cid, []).append((path.name, artist, song, tag))
     return index, groups

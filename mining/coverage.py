@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from mentions import chunk_header, comment_line, read_mentions, video_title  # noqa: E402
+from mentions import chunk_header, comment_line, own_artists, read_mentions, video_title  # noqa: E402
 
 
 def coverage(folder: Path, write_extra: bool) -> dict:
@@ -46,7 +46,8 @@ def coverage(folder: Path, write_extra: bool) -> dict:
         title = video_title(index.values(), folder.name)
         lines = [comment_line(int(cid[1:]), index[cid]) for cid in missed]
         note = f"Re-run: {len(missed)} comments that got no line the first time"
-        (folder / "chunk-extra.md").write_text("\n".join(chunk_header(title, folder.name, note) + lines) + "\n",
+        header = chunk_header(title, folder.name, note, own_artists(folder))
+        (folder / "chunk-extra.md").write_text("\n".join(header + lines) + "\n",
                                                encoding="utf-8")
         extra = "chunk-extra.md"
     result = {"flagged": len(index), "covered": len(index) - len(missed), "missed": missed,

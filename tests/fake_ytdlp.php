@@ -11,5 +11,6 @@ if (getenv('NB_FAKE_YTDLP_FAIL')) {
 }
 preg_match('/v=([\w-]{11})/', (string)end($args), $m);
 $path = str_replace(['%(id)s', '%(ext)s'], [$m[1], 'info.json'], $args[array_search('-o', $args, true) + 1]);
-file_put_contents($path, json_encode(['id' => $m[1], 'title' => 'Test Artist - Test Song',
+file_put_contents($path, json_encode(['id' => $m[1], 'title' => 'Test Artist - Test Song', 'channel' => 'TestLabelVEVO',
+    'uploader' => 'Test Artist - Topic',
     'comments' => json_decode((string)file_get_contents((string)getenv('NB_FAKE_COMMENTS')), true)]));

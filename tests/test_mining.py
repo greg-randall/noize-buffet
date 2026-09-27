@@ -218,6 +218,17 @@ cli = subprocess.run(["python3", str(ROOT / "mining" / "prepare.py"), str(d), "-
                      capture_output=True, text=True)
 check(cli.returncode == 0 and json.loads(cli.stdout)["chunks"] == ["chunk-01.md", "chunk-02.md"], "CLI prints JSON")
 
+print("prepare: the video's own artists in the chunk header")
+own_dir = TMP / "prep_own"
+shutil.rmtree(own_dir, ignore_errors=True)
+own_dir.mkdir(parents=True)
+(own_dir / "music_mentions_flagged.json").write_text(json.dumps({"flagged": [
+    {"comment_id": "x1", "author": "@a", "text": "hi", "video_title": "Cbat"}]}), encoding="utf-8")
+(own_dir / "own_artists.json").write_text(json.dumps(["Hudson Mohawke", "Warp Records"]), encoding="utf-8")
+prepare.prepare(own_dir, 10)
+check("This video's own artist: Hudson Mohawke, Warp Records" in (own_dir / "chunk-01.md").read_text(encoding="utf-8"),
+      "the chunk header names the video's own artists, so the child can tag them")
+
 print("prepare: empty flagged list")
 d4 = video_dir("VIDEO000004", [])
 r4 = prepare.prepare(d4, 150)
@@ -586,6 +597,19 @@ strengths = [lead["strength"] for lead in r["leads"]]
 check(strengths == sorted(strengths, key=lambda s: s != "confirmed"), "confirmed leads first")
 cli = subprocess.run(["python3", str(ROOT / "mining" / "merge_leads.py"), str(root)], capture_output=True, text=True)
 check(cli.returncode == 0 and len(json.loads(cli.stdout)["leads"]) == len(r["leads"]), "CLI prints the same JSON")
+
+own_root = TMP / "merge_own"
+shutil.rmtree(own_root, ignore_errors=True)
+root_saved, root = root, own_root
+mined("VIDEOOWN001", {"c1": ix("@hud", "cry sugar better https://hudmo.ffm.to", 25014), "c2": ix("@x", "TNGHT vibes", 3),
+                      "c3": ix("@y", "hudson mohawke and tnght", 2)},
+      "- [c1] Hudson Mohawke\n- [c2] TNGHT\n- [c3] Hudson Mohawke\n- [c3] TNGHT\n")
+(own_root / "VIDEOOWN001" / "own_artists.json").write_text(json.dumps(["Hudson Mohawke", "Warp Records"]), encoding="utf-8")
+own = merge_leads.merge(own_root)
+by_own = {lead["name_key"]: lead for lead in own["leads"]}
+check("hudsonmohawke" not in by_own and by_own["tnght"]["people"] == 2 and own["skipped"]["own artist"] == 2,
+      "the video's own artist (own_artists.json) is never a lead under that video, even untagged; counted as own artist")
+root = root_saved
 
 only = merge_leads.merge(root, only={"VIDEOBBBBBB", "VIDEOCCCCCC"})
 by = {lead["name_key"]: lead for lead in only["leads"]}

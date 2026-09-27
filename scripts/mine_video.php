@@ -89,7 +89,27 @@ try {
     if (!is_file($info)) {
         $fail('yt-dlp got no comments: ' . $errorLine($offset));
     }
-    $comments = count(json_decode((string)file_get_contents($info), true)['comments'] ?? []);
+    $infoData = json_decode((string)file_get_contents($info), true) ?: [];
+    $comments = count($infoData['comments'] ?? []);
+    // The video's own artist by every name we know: the merge never makes it a lead under this video, and the
+    // chunks tell the child. From the song list, the title before " - ", and yt-dlp's channel and artist fields.
+    $songArtist = nb_locked($pdo, function () use ($pdo, $vid) {
+        $st = $pdo->prepare('SELECT artist FROM songs WHERE video_id = ?');
+        $st->execute([$vid]);
+        return (string)$st->fetchColumn();
+    });
+    $title = (string)($infoData['title'] ?? '');
+    $own = [];
+    foreach ([$songArtist, str_contains($title, ' - ') ? explode(' - ', $title, 2)[0] : '', $infoData['channel'] ?? '',
+        $infoData['uploader'] ?? '', $infoData['artist'] ?? '', $infoData['creator'] ?? '', ...(array)($infoData['creators'] ?? []),
+        ...(array)($infoData['artists'] ?? [])] as $name) {
+        $name = trim((string)preg_replace(['/\s*-\s*Topic$/i', '/VEVO$/'], '', trim((string)$name)));
+        $key = $name === '' ? '' : nb_name_key($name);
+        if ($key !== '' && !isset($own[$key])) {
+            $own[$key] = $name;
+        }
+    }
+    file_put_contents("$dir/own_artists.json", json_encode(array_values($own), JSON_UNESCAPED_UNICODE));
     nb_mining_update($pdo, $vid, ['comments' => $comments]);
     if ($comments === 0) {
         $fail('no comments downloaded (comments may be turned off for this video)');
@@ -235,7 +255,7 @@ try {
     }
     nb_mining_update($pdo, $vid, ['status' => 'done', 'covered' => $cov['covered'], 'mentions' => $mentions,
         'error' => $problems ? implode('; ', $problems) : null]);
-    $say(sprintf('done: %d of %d flagged comments covered, %d mentions of other artists; %d leads in total, %d songs named without an artist (comments/songs_only.jsonl)%s',
+    $say(sprintf('done: %d of %d flagged comments covered, %d mentions of other artists; %d leads in total, %d songs named without an artist (songs_only.jsonl)%s',
         $cov['covered'], $cov['flagged'], $mentions, count($merged['leads']), count($merged['songs_only'] ?? []),
         $problems ? '; problems: ' . implode('; ', $problems) : ''));
 } catch (Throwable $e) {

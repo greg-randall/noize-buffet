@@ -55,6 +55,10 @@ $leads = array_column(nb_leads($pdo), null, 'name_key');
 check(($leads['burial']['strength'] ?? '') === 'confirmed' && $leads['burial']['people'] === 2, 'Burial confirmed by 2 people');
 check(($leads['tomggg']['strength'] ?? '') === 'hint', 'a single-person name is a hint');
 check(substr_count($out, 'V0000000001:') >= 5, 'one progress line per step');
+check(json_decode((string)@file_get_contents("$comments/V0000000001/own_artists.json"), true) === ['Test Artist', 'TestLabel'],
+    "own_artists.json names the video's own artist (the song's artist, the title before ' - ', the channel without VEVO or - Topic), once each");
+check(str_contains((string)file_get_contents("$comments/V0000000001/chunk-01.md"), "This video's own artist: Test Artist, TestLabel"),
+    'and the chunks tell the child');
 
 echo "a download failure\n";
 putenv('NB_FAKE_YTDLP_FAIL=1');

@@ -14,7 +14,7 @@ Everything below is built and tested with stand-ins; these runs check it against
    - pick `typesafe_other_artist_threshold` from the table (the highest one that loses no lead; 0.3 now);
    - check no real comment trips the AI-instruction question, and which made-up attacks it misses;
    - read the most spam-like comments before trusting `typesafe_spam_threshold` (0.9 now).
-3. **Mine one real video**, in a scratch database so your data isn't touched:
+3. **Mine one real video**: first run 2026-09-27 on eN6jkWxxm2Y (Hudson Mohawke's Cbat): 402 s (download 95 s, TypeSafe 157 s for 3,000 comments, one Haiku chunk 150 s); 128 flagged, 21 own-artist skipped, 128 of 128 covered, 54 leads (11 confirmed). Found: Hudson Mohawke himself was a confirmed lead (his pinned promo comment, 25,014 likes): Haiku only saw the title. Fixed: `own_artists.json` (song artist, title before " - ", channel/uploader/artist fields) is dropped in the merge and shown in the chunk header. Still to send: `children.jsonl` (cost). Command, in a scratch database so your data isn't touched:
    `NB_DB="$(pwd)/data/mining-trial.sqlite" NB_COMMENTS_DIR="$(pwd)/data/mining-trial" php scripts/mine_video.php <video_id>`
    then `NB_DB="$(pwd)/data/mining-trial.sqlite" php bin/nb.php leads`. Pick a liked song with a few hundred comments. Note the time, `children.jsonl` costs, and any problems.
 

@@ -6,6 +6,7 @@ name: "- [c12] Burial", '- [c13] Daft Punk — "Get Lucky"', "- [c14] Two Shell 
 numbered lists, a stray comma-separated id list, prose); MENTION_RE is loosened to accept common near-miss
 list styles, and read_mentions() reports lines it still can't parse rather than dropping them.
 """
+import json
 import re
 import unicodedata
 from pathlib import Path
@@ -279,8 +280,18 @@ def comment_line(cid: int, comment: dict) -> str:
     return f"- [c{cid}] {comment['author']} -- {text}"
 
 
-def chunk_header(title: str, video_id: str, note: str) -> list:
-    return [f"# {title}", "", f"https://www.youtube.com/watch?v={video_id}", "", note, ""]
+def chunk_header(title: str, video_id: str, note: str, own: list | None = None) -> list:
+    own_line = [f"This video's own artist: {', '.join(own)}", ""] if own else []
+    return [f"# {title}", "", f"https://www.youtube.com/watch?v={video_id}", "", *own_line, note, ""]
+
+
+def own_artists(folder) -> list:
+    """The video's own artist names from own_artists.json (written by the pipeline), or [] if it's missing or bad."""
+    try:
+        names = json.loads((Path(folder) / "own_artists.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [str(n) for n in names if isinstance(n, str) and n.strip()] if isinstance(names, list) else []
 
 
 def video_title(comments, vid: str) -> str:

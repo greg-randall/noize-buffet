@@ -16,7 +16,7 @@ Your task names one chunk file, e.g. `chunk-01.md`. Its header gives the video t
 
 1. Read the whole chunk file. If the Read tool shows it's truncated, keep reading with `offset` until you reach the last line.
 2. For **every** comment, write one line per musical **artist, band, producer, DJ, song, album or record label** it names.
-   - If it names the **video's own artist** (from the title) or this same song, still write it, tagged `[own artist]`.
+   - If it names the **video's own artist** (from the title, or the header's "This video's own artist" line) or this same song, still write it, tagged `[own artist]`.
    - If it names **nothing musical**, write one line with `none`.
    - If you're not sure a name is a musician, write it and tag it `[unsure]`.
    - Song titles are not artists. If a comment names a song without naming its artist, write the song in quotes on its own line, e.g. `- [c15] "Ready for It"`; don't write the song title as an artist name. If the comment names both, write the artist and put the song in quotes after a dash: `- [c15] Taylor Swift — "Ready for It"`.
