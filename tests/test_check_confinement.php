@@ -19,7 +19,8 @@ $check = function (array $env) use ($fake): array {
 [$code, $out] = $check([]);
 check($code === 0 && str_ends_with(trim($out), 'PASS'), 'a confined child passes' . ($code ? ":\n$out" : ''));
 check(str_contains($out, "yes: mining_child_permission_mode '' or 'dontAsk'"), 'both permission modes are tried and named');
-check(preg_match("/the folder's CLAUDE.md reaches the child:\\s+yes/", $out) && preg_match('/CLAUDE.local.md stays out:\\s+yes/', $out)
+check(preg_match("/the child follows its CLAUDE.md when told to \\(as mining does\\):\\s+yes/", $out)
+    && str_contains($out, 'instruction files loaded without reading them: none') && preg_match('/CLAUDE.local.md stays out:\\s+yes/', $out)
     && preg_match('/tools the child has:\\s+\\["Read","Write"\\]/', $out) && preg_match('/MCP servers the child has:\\s+none/', $out),
     'instructions, tools and MCP servers are checked');
 check(str_contains($out, 'tiny budget: exit 1, subtype "error_max_budget_usd", is_error true'), 'the budget stop is shown as it came back');

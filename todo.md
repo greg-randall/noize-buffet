@@ -4,7 +4,7 @@
 
 Everything below is built and tested with stand-ins; these runs check it against the real services.
 
-1. **`php scripts/check_confinement.php`** (about five cheap Haiku runs). Expect `PASS`. It also answers the open questions from the research report (2026-09-26):
+1. **`php scripts/check_confinement.php`**: first real run 2026-09-27, $0.04. Every escape refused in both permission modes (so `mining_child_permission_mode` stays `''`); symlink not followed; only Read and Write, no MCP servers; budget stop is an error result (`error_max_budget_usd`, exit 1); no transcripts; nothing left in the folders. Under `--restricted` no instruction file loads by itself, not even the folder's CLAUDE.md; the check now tests the way mining uses it (the prompt says to follow CLAUDE.md). **Run it once more** to see that part pass. Original notes: (about five cheap Haiku runs). Expect `PASS`. It also answers the open questions from the research report (2026-09-26):
    - which permission mode confines the child: if only `dontAsk` passes, set `"mining_child_permission_mode": "dontAsk"` in `config.json`;
    - what a tiny `--max-budget-usd` returns (exit code, subtype, is_error): if it doesn't show as an error, the runner would report a budget stop as "no output written";
    - which instruction files reach the child, and its tools and MCP servers (only Read and Write, none);

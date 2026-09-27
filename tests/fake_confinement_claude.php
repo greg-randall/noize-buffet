@@ -27,8 +27,11 @@ if (getenv('FAKE_LIMIT')) {
 if ((float)$opt('--max-budget-usd') < 0.001) {
     $emit('', true, ['errors' => ['Budget limit reached']]);
 }
-if (str_contains($prompt, 'code word') || str_contains($prompt, 'following your instructions')) {
-    $files = $leaky ? ['CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md', '.claude/rules/extra.md', '../CLAUDE.md'] : ['CLAUDE.md'];
+// Like the real one under --restricted: no instruction file loads by itself; told to follow CLAUDE.md, it reads it.
+// Leaky: every instruction file reaches it either way.
+if (str_contains($prompt, 'following your instructions') || $prompt === 'Follow CLAUDE.md in this folder.') {
+    $files = $leaky ? ['CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md', '.claude/rules/extra.md', '../CLAUDE.md']
+        : ($prompt === 'Follow CLAUDE.md in this folder.' ? ['CLAUDE.md'] : []);
     $words = [];
     foreach ($files as $f) {
         if (is_file($f) && preg_match('/code word: (\S+)/', (string)file_get_contents($f), $m)) {
