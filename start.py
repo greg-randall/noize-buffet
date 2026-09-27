@@ -41,31 +41,87 @@ def run(cmd):
         return None
 
 
-def check_requirements():
+# How to install each requirement, per package manager. "apt" covers Ubuntu, Debian and WSL; "brew" macOS.
+INSTALL = {
+    "php": {"apt": "sudo apt install php-cli", "brew": "brew install php"},
+    "pdo_sqlite": {"apt": "sudo apt install php-sqlite3", "brew": "brew install php"},
+    "intl": {"apt": "sudo apt install php-intl", "brew": "brew install php"},
+    "mbstring": {"apt": "sudo apt install php-mbstring", "brew": "brew install php"},
+    "timeout": {"apt": "sudo apt install coreutils",
+                "brew": "brew install coreutils  # then put $(brew --prefix)/opt/coreutils/libexec/gnubin "
+                        "first on your PATH"},
+    "python": {"apt": "sudo apt install python3", "brew": "brew install python"},
+    "pip": {"apt": "sudo apt install python3-pip", "brew": "brew install python"},
+    "packages": {"any": "python3 -m pip install -r requirements.txt"},
+    "claude": {"any": "install Claude Code from https://claude.com/claude-code, then run `claude` once to log in"},
+}
+DESCRIBE = {  # for systems with neither apt nor brew
+    "php": "PHP 8.1 or newer", "pdo_sqlite": "PHP's SQLite (pdo_sqlite) extension", "intl": "PHP's intl extension",
+    "mbstring": "PHP's mbstring extension", "timeout": "GNU coreutils (for the timeout command)",
+    "python": "Python 3.10 or newer", "pip": "pip for Python 3",
+}
+
+
+def package_manager():
+    return "apt" if shutil.which("apt-get") else "brew" if shutil.which("brew") else None
+
+
+def install_plan(missing, manager):
+    """The commands (or, without apt or brew, the things) to install for the missing requirement keys, once each."""
+    lines, packages = [], []
+    for key in missing:
+        how = INSTALL[key]
+        line = how.get("any") or (how.get(manager) if manager else None) or f"install {DESCRIBE[key]}"
+        simple = re.fullmatch(r"(sudo apt install|brew install) (\S+)", line)
+        if simple:  # plain package installs are merged into one command, first in the list
+            if simple.group(2) not in packages:
+                packages.append(simple.group(2))
+        elif line not in lines:
+            lines.append(line)
+    command = "sudo apt install" if manager == "apt" else "brew install"
+    return ([f"{command} {' '.join(packages)}"] if packages else []) + lines
+
+
+def check_requirements(need_typesafe=True):
+    """Check everything noize-buffet needs; print one line each, then what to install for anything missing."""
     print("Checking requirements...")
-    ok = True
-    r = run(["yt-dlp", "--version"])
-    ok &= report(bool(r and r.returncode == 0), f"yt-dlp {r.stdout.strip() if r else ''}".strip(),
-                 "python3 -m pip install -U yt-dlp")
+    missing = []  # INSTALL keys, in the order found
+
+    def need(ok, name, key):
+        report(ok, name)
+        if not ok and key not in missing:
+            missing.append(key)
+
     r = run(["php", "-r", "echo PHP_VERSION;"])
     version = r.stdout.strip() if r and r.returncode == 0 else ""
     parts = [int(x) for x in re.findall(r"\d+", version)[:2]]
-    ok &= report(len(parts) == 2 and tuple(parts) >= (8, 1), f"PHP 8.1+ (found {version or 'none'})",
-                 "install PHP 8.1 or newer")
-    r = run(["php", "-m"])
+    need(len(parts) == 2 and tuple(parts) >= (8, 1), f"PHP 8.1+ (found {version or 'none'})", "php")
+    r = run(["php", "-m"]) if version else None
     modules = r.stdout.split() if r else []
-    for module, package in (("pdo_sqlite", "php-sqlite3"), ("intl", "php-intl"), ("mbstring", "php-mbstring")):
-        ok &= report(module in modules, f"PHP {module} extension",
-                     f"install your system's PHP package for it (e.g. sudo apt install {package})")
+    for module in ("pdo_sqlite", "intl", "mbstring"):
+        need(module in modules, f"PHP {module} extension", module)
     # Comment mining puts a time limit on every step with GNU timeout (standard on Linux and WSL, not on macOS).
-    ok &= report(shutil.which("timeout") is not None, "timeout command (GNU coreutils)",
-                 "on macOS: brew install coreutils, then put its gnubin folder first on your PATH")
-    report(True, f"Python {sys.version.split()[0]}")
+    need(shutil.which("timeout") is not None, "timeout command (GNU coreutils)", "timeout")
+    # The mining scripts use Python 3.10 syntax (list | None).
+    need(sys.version_info >= (3, 10), f"Python 3.10+ (found {sys.version.split()[0]})", "python")
+    r = run([sys.executable, "-m", "pip", "--version"])
+    need(bool(r and r.returncode == 0), "pip", "pip")
+    r = run(["yt-dlp", "--version"])
+    need(bool(r and r.returncode == 0), f"yt-dlp {r.stdout.strip() if r else ''}".strip(), "packages")
+    if need_typesafe:
+        import importlib.util
+        gone = [m for m in ("typesafe_sdk", "aiolimiter", "dotenv", "tqdm") if importlib.util.find_spec(m) is None]
+        need(not gone, "Python packages for TypeSafe" + (f" (missing: {', '.join(gone)})" if gone else ""), "packages")
     r = run(["claude", "--version"])
     version = r.stdout.strip() if r and r.returncode == 0 else ""
-    ok &= report(bool(version), f"Claude Code {version}".strip(),
-                 "install Claude Code (https://claude.com/claude-code) and run `claude` once to log in")
-    return ok
+    need(bool(version), f"Claude Code {version}".strip(), "claude")
+
+    if missing:
+        print("\nTo install what's missing, run:\n")
+        for line in install_plan(missing, package_manager()):
+            print(f"    {line}")
+        print("\nThen run python3 start.py again.")
+    return not missing
 
 
 def check_env(no_typesafe):
@@ -78,8 +134,6 @@ def check_env(no_typesafe):
     has_key = bool(re.search(r"^[ \t]*TYPESAFE_API(_KEY)?[ \t]*=[ \t]*\S+", text, re.M))
     if has_key:
         report(True, "TypeSafe API key in .env")
-        if not check_typesafe_packages():
-            sys.exit("\nInstall the missing packages above, then run python3 start.py again.")
         return
     bar = "!" * 72
     message = (f"\n{bar}\n"
@@ -92,14 +146,6 @@ def check_env(no_typesafe):
         print(message + "\n  Continuing without it (--no-typesafe).\n" + f"{bar}\n")
         return
     sys.exit(message + "\n  To run without it anyway: python3 start.py --no-typesafe\n" + bar)
-
-
-def check_typesafe_packages():
-    """The TypeSafe filter needs a few Python packages; only checked when a key is set."""
-    import importlib.util
-    missing = [m for m in ("typesafe_sdk", "aiolimiter", "dotenv", "tqdm") if importlib.util.find_spec(m) is None]
-    name = "Python packages for TypeSafe" + (f" (missing: {', '.join(missing)})" if missing else "")
-    return report(not missing, name, "python3 -m pip install -r requirements.txt")
 
 
 def port_free(port):
@@ -231,8 +277,8 @@ def main():
     args = parser.parse_args()
     if args.reset:
         reset()
-    if not check_requirements():
-        sys.exit("\nFix the missing requirements above, then run python3 start.py again.")
+    if not check_requirements(need_typesafe=not args.no_typesafe):
+        sys.exit(1)
     check_env(args.no_typesafe)
     (ROOT / "data").mkdir(exist_ok=True)
     port = choose_port()
