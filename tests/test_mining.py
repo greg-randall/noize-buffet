@@ -489,7 +489,8 @@ only_file = TMP / "merge_only.txt"
 only_file.write_text("VIDEOBBBBBB\nVIDEOCCCCCC\n", encoding="utf-8")
 cli = subprocess.run(["python3", str(ROOT / "mining" / "merge_leads.py"), str(root), "--only", str(only_file)],
                      capture_output=True, text=True)
-check(cli.returncode == 0 and len(json.loads(cli.stdout)["leads"]) == len(only["leads"]), "the CLI's --only reads the ids from a file")
+check(cli.returncode == 0 and len(json.loads(cli.stdout)["leads"]) == len(only["leads"]),
+      "the CLI's --only reads the ids from a file")
 
 print("merge leads: repeat lines, song-only lines, unreadable and partial folders")
 root = TMP / "merge2"
