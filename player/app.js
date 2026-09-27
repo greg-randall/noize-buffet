@@ -23,10 +23,20 @@ const state = {
 
 const cur = () => state.songs[state.i];
 
-// Noisy on purpose: every interesting event goes to the browser console with an [nb] prefix.
+// Browser console output, with an [nb] prefix. log(): what happened (songs, ratings, chat, the agent, errors).
+// debug(): the detail behind it (every save, player states, loads); off unless `nb.verbose(true)` in the console,
+// which is remembered in this browser.
 const log = (...args) => console.log('[nb]', ...args);
+let verbose = false;
+try { verbose = localStorage.getItem('nb-verbose') === '1'; } catch (e) { /* storage blocked: stay quiet */ }
+const debug = (...args) => { if (verbose) console.debug('[nb]', ...args); };
 const YT_STATES = {'-1': 'unstarted', 0: 'ended', 1: 'playing', 2: 'paused', 3: 'buffering', 5: 'cued'};
 window.nb = state; // type `nb` in the console to inspect the current state
+state.verbose = on => {
+  verbose = !!on;
+  try { localStorage.setItem('nb-verbose', verbose ? '1' : '0'); } catch (e) { /* not remembered */ }
+  return `verbose console output ${verbose ? 'on' : 'off'}`;
+};
 
 function connError(what, xhr) {
   const msg = (xhr.responseJSON && xhr.responseJSON.error) || (xhr.status ? 'HTTP ' + xhr.status : "can't reach server");
@@ -54,12 +64,12 @@ function save(extra) {
   const idx = state.i;
   state.lastSaveAt = Date.now();
   const body = payload(extra);
-  log('save →', body);
+  debug('save →', body);
   return $.ajax({
     url: 'api.php?action=save', method: 'POST', contentType: 'application/json',
     data: JSON.stringify(body), dataType: 'json',
   }).done(res => {
-    log('save ✓', res.row);
+    debug('save ✓', res.row);
     Object.assign(state.songs[idx], res.row);
     renderRow(idx);
     setStatus('saved ' + new Date().toLocaleTimeString(), 'text-bg-success');
@@ -109,7 +119,10 @@ function renderQueue() {
 function refreshQueue(initial) {
   return $.getJSON('api.php', {action: 'queue'}).done(songs => {
     connOk();
-    log('queue loaded:', songs.length, 'songs', {initial});
+    const added = songs.length - state.songs.length;
+    if (initial) log(`queue: ${songs.length} songs`);
+    else if (added > 0) log(`queue: ${added} new songs, ${songs.length} in all`);
+    else debug('queue reloaded:', songs.length, 'songs');
     const currentId = cur() ? cur().video_id : null;
     state.songs = songs;
     renderQueue();
@@ -132,8 +145,8 @@ function showProgress() {
 }
 
 function cueOrLoad(id, autoplay) {
-  if (!state.ready) { log('player not ready yet; queued', id); state.pendingVideo = {id, autoplay}; return; }
-  log(autoplay ? 'load+play' : 'cue', id);
+  if (!state.ready) { debug('player not ready yet; queued', id); state.pendingVideo = {id, autoplay}; return; }
+  debug(autoplay ? 'load+play' : 'cue', id);
   if (autoplay) state.player.loadVideoById(id); else state.player.cueVideoById(id);
 }
 
@@ -146,7 +159,8 @@ function loadSong(idx, autoplay, byUser) {
   state.played = false;
   state.furthest = s.furthest_pct || 0;
   state.duration = s.duration_s || null;
-  log(`song ${idx + 1}/${state.songs.length}:`, s.video_id, s.artist, '-', s.title, {autoplay, byUser, furthest: state.furthest});
+  log(`▶ ${idx + 1}/${state.songs.length}: ${s.artist} - ${s.title} [${s.video_id}]`);
+  debug('song details', {autoplay, byUser, furthest: state.furthest});
   $('#song-title').text(s.title);
   $('#song-artist').text(s.artist);
   $('#song-meta').text([s.bucket, s.source].filter(Boolean).join(' · '));
@@ -189,10 +203,11 @@ function saveOnLeave(movingForward) {
   if (state.played) {
     const ended = state.ready && state.player.getPlayerState() === YT.PlayerState.ENDED;
     const skipped = movingForward && !ended && state.furthest < 100;
-    log('leaving played song', cur().video_id, skipped ? '→ marked skipped' : '→ saved', {furthest: state.furthest, ended});
+    log(`${skipped ? 'skipped' : 'left'} at ${Math.round(state.furthest)}%`);
+    debug('leaving', cur().video_id, {furthest: state.furthest, ended});
     save(skipped ? {skipped: 1} : {});
   } else {
-    log('leaving unplayed song → not recorded', cur().video_id);
+    debug('leaving unplayed song → not recorded', cur().video_id);
   }
 }
 
@@ -215,15 +230,14 @@ function poll() {
 }
 
 function onStateChange(e) {
-  log('player state:', YT_STATES[e.data] || e.data, cur() ? cur().video_id : '');
+  debug('player state:', YT_STATES[e.data] || e.data, cur() ? cur().video_id : '');
   if (e.data === YT.PlayerState.PLAYING) state.played = true;
   if (e.data === YT.PlayerState.PAUSED) save();
   if (e.data === YT.PlayerState.ENDED) {
     state.furthest = 100;
     showProgress();
     const advance = state.interacted && state.i < state.songs.length - 1;
-    log('song ended →', advance ? 'auto-advancing' : 'stopping',
-      {interacted: state.interacted, lastSong: state.i >= state.songs.length - 1});
+    log('finished', advance ? '→ next song' : '→ stopping (last song, or no click on the page yet)');
     save({finished: 1}).always(() => { if (advance) loadSong(state.i + 1, true, false); });
   }
 }
@@ -279,7 +293,10 @@ function pollChat() {
     state.chatState = res.state;
     state.jobs = res.jobs;
     const busy = !!res.jobs.running || res.jobs.queued > 0;
-    if (busy !== state.agentBusy) log('agent', busy ? 'busy' : 'idle', res.jobs);
+    if (busy !== state.agentBusy) {
+      log(busy ? 'agent working' : 'agent done');
+      debug('jobs', res.jobs);
+    }
     // Picks up new songs, and notes, ratings and toggles the agent recorded.
     if (state.agentBusy && !busy) refreshQueue(false).done(() => { renderSongNotes(); renderSongControls(); });
     state.agentBusy = busy;
@@ -354,9 +371,9 @@ function pollMining() {
 // ---------- wiring ----------
 
 $(function () {
-  log('page loaded; state is window.nb');
+  debug('page loaded; state is window.nb');
   $.ajax({url: 'api.php?action=start', method: 'POST', contentType: 'application/json', data: '{}'})
-    .done(res => log(res.started ? 'first run: interview queued' : 'existing install'))
+    .done(res => { if (res.started) log('first run: interview queued'); })
     .fail(xhr => connError('starting up', xhr));
   refreshQueue(true);
   pollChat();
@@ -387,8 +404,8 @@ $(function () {
     save({new_to_me: this.value === '' ? null : this.value === '1'});
   });
 
-  $('#btn-next').on('click', () => { log('clicked Next'); leaveAndGo(state.i + 1); });
-  $('#btn-back').on('click', () => { log('clicked Back'); leaveAndGo(state.i - 1); });
+  $('#btn-next').on('click', () => { debug('clicked Next'); leaveAndGo(state.i + 1); });
+  $('#btn-back').on('click', () => { debug('clicked Back'); leaveAndGo(state.i - 1); });
   $('#queue-list').on('click', 'tr', function () { leaveAndGo(parseInt($(this).data('idx'), 10)); });
 
   $('#chat-form').on('submit', function (e) {
@@ -398,9 +415,9 @@ $(function () {
     $('#chat-input').val('');
     if (cur()) state.interacted = true; // talking about the song counts as being here
     const song = songContext();
-    log('sending chat:', text, song ? `(about ${song.artist} - ${song.title})` : '');
+    debug('sending chat:', text, song ? `(about ${song.artist} - ${song.title})` : '');
     $.ajax({url: 'api.php?action=send', method: 'POST', contentType: 'application/json', data: JSON.stringify({message: text, song})})
-      .done(() => log('sent; the long-poll will pick up the reply'))
+      .done(() => debug('sent; the long-poll will pick up the reply'))
       .fail(xhr => appendChat({role: 'system', text: 'Could not send: ' + ((xhr.responseJSON && xhr.responseJSON.error) || xhr.status)}));
   });
   $('#chat-input').on('keydown', function (e) {

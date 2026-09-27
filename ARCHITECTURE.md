@@ -180,7 +180,7 @@ Runs every `tests/test_*.php` and `tests/test_*.py`. They use stand-ins, so they
 ## When something goes wrong
 
 - **The agent:** the `[agent]` lines show each tool call as it happens, then a line per job with status, time, turns, cost at API prices and whether the process was reused, then any `BLOCKED:` tools and the job's debug file. `data/jobs/<id>.json` has everything about one job; `data/nb.log` every database command with its input and output; `data/parent-stderr.log` anything `claude` printed to stderr.
-- **The page:** `data/api-errors.log` has server errors with stack traces. The browser console logs every event with an `[nb]` prefix; type `nb` there to inspect the page's state.
+- **The page:** `data/api-errors.log` has server errors with stack traces. The browser console logs what happens (songs, ratings, chat, the agent, errors) with an `[nb]` prefix; `nb.verbose(true)` there adds every save, player state and load (remembered in that browser; `nb.verbose(false)` turns it off), and `nb` shows the page's state. Type `[nb]` in the console's filter box to hide YouTube's own warnings.
 - **Mining:** the `[mine]` lines show each video's steps. For one video, `comments/<video_id>/mine.log` has everything yt-dlp, the filter and the children printed; `children.jsonl` each child's result; `coverage.json` which comments got no line. The panel's Problems column shows the row's error, and Notes what the filter skipped.
 - **Every Haiku child fails at start-up** and `mine.log` mentions MCP or a managed policy: a managed `managed-mcp.json` makes `--strict-mcp-config` exit at once. Remove that flag from `nb_child_command()`.
 - **Mining never starts:** check the navbar for "mining paused … (out of Claude usage)".
