@@ -10,3 +10,10 @@ brief.md
 taste.md
 *.json
 !config.json
+*.sqlite-wal
+*.sqlite-shm
+.venv/
+# files Windows, Google Drive and macOS drop into folders
+desktop.ini
+Thumbs.db
+.DS_Store
