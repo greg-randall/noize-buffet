@@ -587,6 +587,20 @@ function nb_mining_recover_interrupted(PDO $pdo): int
     });
 }
 
+/**
+ * Failed videos last tried more than $afterS seconds ago go back in the queue (a 429 or a network blip may not
+ * happen again). Returns how many. A permanent failure (comments turned off) costs one quick try per $afterS.
+ */
+function nb_mining_retry_failed(PDO $pdo, int $afterS): int
+{
+    return nb_write($pdo, function () use ($pdo, $afterS): int {
+        $st = $pdo->prepare("UPDATE mining SET status = 'queued', error = 'retrying: ' || COALESCE(error, ''), updated_at = ?
+            WHERE status = 'failed' AND updated_at < ?");
+        $st->execute([nb_now(), gmdate('Y-m-d\TH:i:s\Z', time() - $afterS)]);
+        return $st->rowCount();
+    });
+}
+
 /** Replace the whole leads table with $leads (the "leads" rows from mining/merge_leads.py). */
 function nb_leads_replace(PDO $pdo, array $leads): void
 {

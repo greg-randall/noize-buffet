@@ -187,4 +187,26 @@ proc_close($p);
 $r = $row('V0000000010');
 check($r['status'] === 'done' && $r['error'] === null, 'once usage is back the worker mines it normally');
 
+echo "a child that tampers, and folders that didn't finish\n";
+// A folder with extraction output but no finished mining row (e.g. a failed or half-mined video): never merged.
+$stray = "$comments/VSTRAY00000";
+@mkdir($stray, 0777, true);
+file_put_contents("$stray/comment_index.json", json_encode(['c1' => ['author' => '@z', 'author_id' => 'UCz', 'like_count' => 1, 'text' => 'Ghostband!']]));
+file_put_contents("$stray/artists.chunk-01.md", "- [c1] Ghostband\n");
+putenv('NB_FAKE_CHILD_TAMPER=claude');
+nb_mining_enqueue($pdo, 'V0000000011');
+[$code, $out] = $mine('V0000000011');
+putenv('NB_FAKE_CHILD_TAMPER');
+$r = $row('V0000000011');
+check($code === 1 && $r['status'] === 'failed' && str_contains((string)$r['error'], 'changed files it must not touch'),
+    'a child that changes files it must not touch fails the video');
+check(glob("$comments/V0000000011/artists.chunk-*.md") === [], "and every child output in that folder is thrown away");
+check(file_get_contents("$comments/V0000000011/CLAUDE.md") === file_get_contents(__DIR__ . '/../mining/child_CLAUDE.md'),
+    'CLAUDE.md was put back');
+nb_mining_enqueue($pdo, 'V0000000012');
+[$code] = $mine('V0000000012');
+$names = array_column(nb_leads($pdo), 'name_key');
+check($code === 0 && !in_array('ghostband', $names, true), "a folder that didn't finish mining is never merged into the leads");
+check(in_array('burial', $names, true), 'the finished videos still are');
+
 finish();

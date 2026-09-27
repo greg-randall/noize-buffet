@@ -144,8 +144,16 @@ try {
     // 4. One confined child per chunk lists the names.
     nb_mining_update($pdo, $vid, ['status' => 'extracting']);
     copy(nb_root() . '/mining/child_CLAUDE.md', "$dir/CLAUDE.md");
-    $runChild = function (string $chunk) use ($pdo, $dir, $config, &$problems, $waitForUsage): void {
+    $runChild = function (string $chunk) use ($pdo, $dir, $config, &$problems, $waitForUsage, $fail): void {
         $c = nb_run_child($chunk, $dir, $config);
+        if ($c['tampered']) {
+            // It did something a confined child must never do (its files are restored): nothing it wrote is
+            // trusted, so every output in this folder is thrown away and the video fails.
+            foreach (glob("$dir/artists.chunk-*.md") ?: [] as $f) {
+                @unlink($f);
+            }
+            $fail("$chunk: {$c['error']}; all extraction output for this video was thrown away");
+        }
         if (!$c['ok'] && ($limit = nb_usage_limit($c['error'])) !== null) {
             nb_usage_pause($pdo, $limit);
             $waitForUsage(nb_usage_paused($pdo) ?? ['until' => time() + 1800, 'message' => $limit]);
@@ -178,9 +186,14 @@ try {
 
     // 6. Merge every mined video into the leads table. One merge at a time: workers run in parallel, and an older
     // snapshot must not overwrite a newer one, nor a merge read another video's half-written files.
+    // Only videos that finished mining (and this one) are merged: a failed or half-mined folder's files never
+    // become leads.
     $lock = fopen(nb_comments_dir() . '/merge.lock', 'c');
     flock($lock, LOCK_EX);
-    $r = nb_run_logged($py('merge_leads.py', [nb_comments_dir()]), nb_root(), $log, NB_SCRIPT_TIMEOUT_S);
+    $finished = array_column(array_filter(nb_mining_list($pdo), fn($m) => $m['status'] === 'done'), 'video_id');
+    $onlyFile = nb_comments_dir() . '/merge-only.txt';
+    file_put_contents($onlyFile, implode("\n", array_unique([...$finished, $vid])) . "\n");
+    $r = nb_run_logged($py('merge_leads.py', [nb_comments_dir(), '--only', $onlyFile]), nb_root(), $log, NB_SCRIPT_TIMEOUT_S);
     $merged = json_decode($r['out'], true);
     if ($r['exit'] !== 0 || !is_array($merged)) {
         $fail("merge_leads.py failed; see $log");

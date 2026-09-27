@@ -20,7 +20,9 @@ Nothing else is dropped:
 Output: {"leads": [...], "songs_only": [...], "skipped": {"own artist": N, "none": N}, "problems": ["..."],
 "notes": ["..."]}
 
-Usage: python3 mining/merge_leads.py <comments folder>
+Usage: python3 mining/merge_leads.py <comments folder> [--only <file with one video id per line>]
+With --only, only those videos are merged (the pipeline passes the ones that finished mining, so a failed or
+half-mined video's files never become leads); the folders left out are counted in "notes".
 """
 import json
 import sys
@@ -130,7 +132,7 @@ def _read_video(folder: Path, vid: str, skipped: dict, problems: list, notes: li
     return index, groups
 
 
-def merge(root: Path) -> dict:
+def merge(root: Path, only: set | None = None) -> dict:
     leads, songs_only = _new_store(), _new_store()
     skipped = {"own artist": 0, "none": 0}
     problems = []
@@ -138,6 +140,11 @@ def merge(root: Path) -> dict:
     noted = set()
     folders = sorted({p.parent for p in root.glob("*/comment_index.json")}
                      | {p.parent for p in root.glob("*/artists.chunk-*.md")})
+    if only is not None:
+        left_out = [f.name for f in folders if f.name not in only]
+        if left_out:
+            notes.append(f"{len(left_out)} video folder(s) not merged (not finished mining): {', '.join(left_out)}")
+        folders = [f for f in folders if f.name in only]
     for folder in folders:
         vid = folder.name
         video = _read_video(folder, vid, skipped, problems, notes)
@@ -181,9 +188,14 @@ def merge(root: Path) -> dict:
 
 
 def main():
-    if len(sys.argv) != 2:
-        sys.exit("usage: python3 mining/merge_leads.py <comments folder>")
-    result = merge(Path(sys.argv[1]))
+    args = sys.argv[1:]
+    only = None
+    if len(args) == 3 and args[1] == "--only":
+        only = set(Path(args[2]).read_text(encoding="utf-8").split())
+        args = args[:1]
+    if len(args) != 1:
+        sys.exit("usage: python3 mining/merge_leads.py <comments folder> [--only <file of video ids>]")
+    result = merge(Path(args[0]), only)
     print(json.dumps(result, ensure_ascii=False))
     confirmed = sum(r["strength"] == "confirmed" for r in result["leads"])
     print(f"{len(result['leads'])} leads ({confirmed} confirmed); {len(result['songs_only'])} songs without an "

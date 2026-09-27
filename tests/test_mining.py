@@ -480,6 +480,17 @@ check(strengths == sorted(strengths, key=lambda s: s != "confirmed"), "confirmed
 cli = subprocess.run(["python3", str(ROOT / "mining" / "merge_leads.py"), str(root)], capture_output=True, text=True)
 check(cli.returncode == 0 and len(json.loads(cli.stdout)["leads"]) == len(r["leads"]), "CLI prints the same JSON")
 
+only = merge_leads.merge(root, only={"VIDEOBBBBBB", "VIDEOCCCCCC"})
+by = {lead["name_key"]: lead for lead in only["leads"]}
+check("lone" not in by and "daftpunk" not in by and by["burial"]["mentions"] == 1 and by["knife"]["videos"] == 2,
+      "only= merges just the listed videos (e.g. the ones that finished mining)")
+check(any("VIDEOAAAAAA" in n and "not finished" in n for n in only["notes"]), "and notes the folders it left out")
+only_file = TMP / "merge_only.txt"
+only_file.write_text("VIDEOBBBBBB\nVIDEOCCCCCC\n", encoding="utf-8")
+cli = subprocess.run(["python3", str(ROOT / "mining" / "merge_leads.py"), str(root), "--only", str(only_file)],
+                     capture_output=True, text=True)
+check(cli.returncode == 0 and len(json.loads(cli.stdout)["leads"]) == len(only["leads"]), "the CLI's --only reads the ids from a file")
+
 print("merge leads: repeat lines, song-only lines, unreadable and partial folders")
 root = TMP / "merge2"
 shutil.rmtree(root, ignore_errors=True)

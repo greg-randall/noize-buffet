@@ -53,6 +53,22 @@ check($threw, 'update on a video with no mining row throws');
 check(nb_mining_recover_interrupted($pdo) === 1 && $row('M0000000002')['status'] === 'queued', 'an interrupted video goes back to the queue');
 check(nb_mining_next(fresh_db('test_mining_empty')) === null, 'next returns null on an empty queue');
 
+echo "failed videos are retried after a day\n";
+$f = fresh_db('test_mining_retry');
+foreach (['F0000000001', 'F0000000002', 'F0000000003'] as $vid) {
+    nb_mining_enqueue($f, $vid);
+}
+nb_mining_update($f, 'F0000000001', ['status' => 'failed', 'error' => 'yt-dlp got no comments: HTTP Error 429']);
+nb_mining_update($f, 'F0000000002', ['status' => 'failed', 'error' => 'yt-dlp got no comments: HTTP Error 429']);
+nb_mining_update($f, 'F0000000003', ['status' => 'done']);
+$f->exec("UPDATE mining SET updated_at = '2020-01-01T00:00:00Z' WHERE video_id IN ('F0000000001', 'F0000000003')");
+check(nb_mining_retry_failed($f, 86400) === 1, 'one video failed more than a day ago: retried');
+$st = array_column(nb_mining_list($f), 'status', 'video_id');
+check($st['F0000000001'] === 'queued' && $st['F0000000002'] === 'failed' && $st['F0000000003'] === 'done',
+    'the recent failure and the done video are left alone');
+$r1 = array_values(array_filter(nb_mining_list($f), fn($m) => $m['video_id'] === 'F0000000001'))[0];
+check(str_starts_with((string)$r1['error'], 'retrying: ') && str_contains((string)$r1['error'], '429'), 'its last error is kept, marked as being retried');
+
 echo "recover interrupted leaves done/failed alone\n";
 nb_mining_update($pdo, 'M0000000001', ['status' => 'done']);
 nb_mining_update($pdo, 'M0000000003', ['status' => 'failed', 'error' => 'boom']);

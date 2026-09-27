@@ -13,6 +13,10 @@ $n = nb_mining_recover_interrupted($pdo);
 if ($n > 0) {
     fwrite(STDERR, '[' . nb_now() . "] $n interrupted video(s) put back in the mining queue\n");
 }
+$n = nb_mining_retry_failed($pdo, 86400);
+if ($n > 0) {
+    fwrite(STDERR, '[' . nb_now() . "] $n video(s) that failed more than a day ago put back in the mining queue\n");
+}
 $n = nb_mining_backfill($pdo);
 if ($n > 0) {
     fwrite(STDERR, '[' . nb_now() . "] queued $n song(s) rated top/yes or named by you earlier\n");
