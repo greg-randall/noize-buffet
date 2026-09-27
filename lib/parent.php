@@ -205,7 +205,7 @@ function nb_run_parent_job(PDO $pdo, array $job, array $config, NbParentProcess 
         }
     };
 
-    $started = microtime(true);
+    $started = nb_clock();
     $newProcess = false;
     $prevCost = 0.0;
     $pid = null;
@@ -242,7 +242,7 @@ function nb_run_parent_job(PDO $pdo, array $job, array $config, NbParentProcess 
         'resumed_session' => $sid,
         'prompt' => $prompt,
         'process' => ['pid' => $pid, 'started_for_this_job' => $newProcess, 'command' => $parent->command],
-        'duration_s' => round(microtime(true) - $started, 1),
+        'duration_s' => round(nb_clock() - $started, 1),
         'ok' => $ok,
         'error' => $error,
         'num_turns' => $res['num_turns'] ?? null,

@@ -25,12 +25,13 @@ $logSize = function () use ($log): int { // where the next command's output will
     clearstatcache(true, $log);
     return (int)filesize($log);
 };
-$started = microtime(true);
+$started = nb_clock();
 $say = function (string $msg) use ($vid, $started): void {
-    printf("[%s] %s: %s (%.0fs)\n", nb_now(), $vid, $msg, microtime(true) - $started);
+    printf("[%s] %s: %s (%.0fs)\n", nb_now(), $vid, $msg, nb_clock() - $started);
 };
 // NB_PYTHON_BIN lets tests stand in for python3 (tests/fake_python.py fakes the TypeSafe filter).
-$py = fn(string $script, array $args): array => array_merge([getenv('NB_PYTHON_BIN') ?: 'python3', nb_root() . "/mining/$script"], $args);
+$python = getenv('NB_PYTHON_BIN') ?: (nb_find_bin('python3') ?? 'python3');
+$py = fn(string $script, array $args): array => array_merge([$python, nb_root() . "/mining/$script"], $args);
 // Time limits, so a hung subprocess can't hold a worker forever (children have mining_child_timeout_s).
 const NB_YTDLP_TIMEOUT_S = 1800.0;
 const NB_FILTER_TIMEOUT_S = 3600.0;
@@ -71,7 +72,7 @@ try {
     $say("downloading up to {$config['mining_comment_cap']} top comments with yt-dlp, this can take a few minutes…");
     $info = "$dir/$vid.info.json";
     @unlink($info);
-    $yt = [getenv('NB_YTDLP_BIN') ?: 'yt-dlp', '--skip-download', '--write-comments', '--write-info-json',
+    $yt = [getenv('NB_YTDLP_BIN') ?: (nb_find_bin('yt-dlp') ?? 'yt-dlp'), '--skip-download', '--write-comments', '--write-info-json',
         '--no-write-playlist-metafiles', '--extractor-args', "youtube:comment_sort=top;max_comments={$config['mining_comment_cap']}",
         '-o', "$dir/%(id)s.%(ext)s", "https://www.youtube.com/watch?v=$vid"];
     for ($attempt = 1; ; $attempt++) {

@@ -125,8 +125,8 @@ check(in_array('--input', $ts, true) && $arg('--env') === $keyEnv && $arg('--son
 check($arg('--other-artist-threshold') === '0.3' && $arg('--injection-threshold') === '0.5' && $arg('--spam-threshold') === '0.9',
     'and the other-artist, injection and spam thresholds from the config');
 check($r['notes'] === null, 'nothing skipped or quarantined: no notes');
-check(array_column($lines($pyLog), 'script') === ['find_music_mentions.py', 'prepare.py', 'merge_leads.py'],
-    'TypeSafe: the pipeline runs the filter, prepare and merge through NB_PYTHON_BIN, in that order');
+check(array_column($lines($pyLog), 'script') === ['find_music_mentions.py', 'prepare.py', 'coverage.py', 'coverage.py', 'merge_leads.py'],
+    'TypeSafe: the pipeline runs the filter, prepare, coverage (before and after the re-run) and merge through NB_PYTHON_BIN, in that order');
 $seen = [];
 foreach ($lines($statusLog) as $p) {
     $seen[$p['tool']][] = $p['status']['V0000000005'] ?? '?';

@@ -33,6 +33,8 @@ declare(strict_types=1);
 //     claudedirfull replaces CLAUDE.md with a folder that has a file in it
 //     minelink | childrenlink   replace mine.log | children.jsonl with a symlink to NB_FAKE_OUTSIDE
 //     infoappend | inforemove | infodir   append to, delete, or replace with a folder the pre-existing video.info.json
+//     subdirfile | subdirnew   append to stuff/inner.txt, or create stuff/new.txt, in the pre-existing folder stuff/
+//     relink       point the pre-existing symlink "pointer" somewhere else
 //   NB_FAKE_OUTSIDE=path     the file the *link switches point at (a file outside the folder)
 //   NB_FAKE_CHILD_ERRSUBTYPE=s  an error result with subtype s and "errors": ["Budget limit reached", "second"], no "result" key
 //   NB_FAKE_CHILD_ERRRESULT=1   an error result with "subtype":"success" and "result":"API Error: 500 overloaded"
@@ -121,6 +123,9 @@ foreach (array_filter(explode(',', (string)getenv('NB_FAKE_CHILD_TAMPER'))) as $
         'infoappend' => file_put_contents('video.info.json', "appended by the child\n", FILE_APPEND),
         'inforemove' => unlink('video.info.json'),
         'infodir' => (unlink('video.info.json') && mkdir('video.info.json')),
+        'subdirfile' => file_put_contents('stuff/inner.txt', "changed by the child\n", FILE_APPEND),
+        'subdirnew' => file_put_contents('stuff/new.txt', "new\n"),
+        'relink' => (unlink('pointer') && symlink('/etc/hostname', 'pointer')),
         'claudedir' => (unlink('CLAUDE.md') && mkdir('CLAUDE.md')),
         'claudelink' => (unlink('CLAUDE.md') && symlink((string)getenv('NB_FAKE_OUTSIDE'), 'CLAUDE.md')),
         'indexlink' => (unlink('comment_index.json') && symlink((string)getenv('NB_FAKE_OUTSIDE'), 'comment_index.json')),

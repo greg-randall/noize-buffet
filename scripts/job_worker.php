@@ -46,11 +46,11 @@ while (true) {
         continue;
     }
     fwrite(STDERR, '[' . nb_now() . "] job {$job['id']} ({$job['kind']}) started\n");
-    $t = microtime(true);
+    $t = nb_clock();
     $s = nb_run_parent_job($pdo, $job, $config, $parent, $logToolCalls);
     $status = nb_locked($pdo, fn() => $pdo->query('SELECT status FROM jobs WHERE id = ' . (int)$job['id'])->fetchColumn());
     fwrite(STDERR, sprintf("[%s] job %d %s in %.1fs, %s turns, $%s (API-equivalent), agent process %s (pid %s)\n", nb_now(),
-        $job['id'], $status, microtime(true) - $t, $s['turns'] ?? '?',
+        $job['id'], $status, nb_clock() - $t, $s['turns'] ?? '?',
         isset($s['cost_usd']) ? number_format((float)$s['cost_usd'], 4) : '?', $s['process'], $s['pid'] ?? '?'));
     foreach ($s['denials'] as $d) {
         fwrite(STDERR, "    BLOCKED: $d\n");

@@ -27,6 +27,15 @@ function nb_now(): string
     return gmdate('Y-m-d\TH:i:s\Z');
 }
 
+/**
+ * Seconds on a monotonic clock, for durations and deadlines (not the time of day). microtime() follows the wall
+ * clock, which went backwards on WSL here ("exit 124 after -0.5s").
+ */
+function nb_clock(): float
+{
+    return hrtime(true) / 1e9;
+}
+
 function nb_db(?string $path = null): PDO
 {
     $path = $path ?? nb_db_path();
@@ -124,9 +133,9 @@ function nb_locked(PDO $pdo, callable $fn): mixed
     if ($h === false) {
         throw new RuntimeException("can't open the database lock file $file");
     }
-    $deadline = microtime(true) + NB_LOCK_WAIT_S;
+    $deadline = nb_clock() + NB_LOCK_WAIT_S;
     while (!flock($h, LOCK_EX | LOCK_NB)) {
-        if (microtime(true) >= $deadline) {
+        if (nb_clock() >= $deadline) {
             fclose($h);
             throw new RuntimeException('database busy: another process held the lock for ' . NB_LOCK_WAIT_S . ' seconds');
         }

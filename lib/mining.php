@@ -67,10 +67,8 @@ function nb_has_typesafe_key(): bool
 /** Safely append a line to children.jsonl or mine.log only if the file is safe (doesn't exist or is a regular non-symlink file). */
 function nb_append_jsonl(string $path, string $line): bool
 {
-    if (file_exists($path)) {
-        if (!is_file($path) || is_link($path)) {
-            return false;
-        }
+    if (is_link($path) || (file_exists($path) && !is_file($path))) { // is_link first: file_exists() is false for a dangling link
+        return false;
     }
     $result = file_put_contents($path, $line . "\n", FILE_APPEND | LOCK_EX);
     return $result !== false;
@@ -117,10 +115,18 @@ function nb_restore_file(string $workDir, string $path, string $bytes, int $mode
 /** Find the `timeout` command by scanning PATH (no shell). Skip relative entries. */
 function nb_find_timeout(): ?string
 {
-    $path = getenv('PATH') ?: '';
-    foreach (explode(PATH_SEPARATOR, $path) as $d) {
-        if ($d !== '' && $d[0] === '/' && is_file("$d/timeout") && is_executable("$d/timeout")) {
-            return "$d/timeout";
+    return nb_find_bin('timeout');
+}
+
+/**
+ * The absolute path of program $name on PATH, or null. Relative PATH entries ("", ".", "bin") are skipped: they
+ * would resolve against the working folder, and a child's folder is full of files it may have written.
+ */
+function nb_find_bin(string $name): ?string
+{
+    foreach (explode(PATH_SEPARATOR, getenv('PATH') ?: '') as $d) {
+        if ($d !== '' && $d[0] === '/' && is_file("$d/$name") && is_executable("$d/$name")) {
+            return "$d/$name";
         }
     }
     return null;
@@ -128,8 +134,11 @@ function nb_find_timeout(): ?string
 
 /**
  * Run a command (no shell) in $cwd, appending its stdout and stderr to $logFile, with an optional time limit.
- * With a time limit, uses GNU `timeout` command to enforce it and a kill-after grace period.
- * Returns ['exit' => ?int (null if killed), 'out' => stdout text, 'timed_out' => bool, 'duration_s' => float].
+ * With a time limit, uses GNU `timeout` command to enforce it and a kill-after grace period; a command that still
+ * runs after that is killed and reported as timed out.
+ * Returns ['exit' => ?int, 'out' => stdout text, 'timed_out' => bool, 'duration_s' => float]; exit is null only when
+ * timed_out is true. Without a time limit it waits for stdout to close, so a grandchild that keeps stdout open makes
+ * it wait too (the pipeline always passes a limit).
  */
 function nb_run_logged(array $cmd, string $cwd, string $logFile, ?float $timeoutS = null, float $killAfterS = 5.0): array
 {
@@ -270,7 +279,7 @@ function nb_child_command(string $chunk, string $workDir, array $config): array
     $absPath = ltrim($realDir, '/') . '/artists.' . $chunk;
 
     return [
-        getenv('NB_CLAUDE_BIN') ?: 'claude', '-p',
+        getenv('NB_CLAUDE_BIN') ?: (nb_find_bin('claude') ?? 'claude'), '-p',
         "Follow CLAUDE.md in this folder. Process $chunk and write artists.$chunk.",
         '--model', (string)$config['mining_child_model'],
         '--tools', 'Read,Write',
@@ -303,469 +312,256 @@ function nb_child_permission_mode(array $config): array
 /**
  * Run one child on $chunk in $workDir. Appends a summary line to children.jsonl and returns it:
  * chunk, ok, error, duration_s, cost_usd, turns, denials (each "Tool: input"), tampered (array of paths).
+ *
+ * Before the run it refuses (a not-ok summary, no child started) when anything in the folder could mislead or be
+ * abused: a stray instruction file, a log or protected file that is a symlink or not a regular file, an unreadable
+ * protected file, or another child already running in the folder. Protected files (CLAUDE.md, the comment files,
+ * every chunk and every other artists file) are snapshotted; after the run any change to them is undone and reported
+ * as tampering, as is any change to other entries (at the top level and inside folders that were already there).
+ * A file the child created is reported but left in place; the caller must stop on `tampered` (mine_video.php does).
  */
 function nb_run_child(string $chunk, string $workDir, array $config): array
 {
-    // Validate chunk name
     if (!preg_match('/^chunk-[\w-]+\.md\z/', $chunk)) {
         throw new InvalidArgumentException("invalid chunk name: $chunk");
     }
-
-    // Initialize log paths first (before any writes)
     $mineLog = "$workDir/mine.log";
     $childrenJsonl = "$workDir/children.jsonl";
+    $outputFile = "artists.$chunk";
+    $outputPath = "$workDir/$outputFile";
+    $refuse = fn(string $error): array => nb_child_summary($childrenJsonl, $chunk, false, $error);
 
-    // Validate timeout before doing any work
     $timeout = (float)($config['mining_child_timeout_s'] ?? 0);
     if ($timeout <= 0) {
-        $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "invalid mining_child_timeout_s: $timeout",
-            'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
-        nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
-        return $summary;
+        return $refuse("invalid mining_child_timeout_s: $timeout");
     }
-
-    // Check for stray instruction files before anything else
-    $strayInstructions = [
-        'CLAUDE.local.md' => "$workDir/CLAUDE.local.md",
-        'AGENTS.md' => "$workDir/AGENTS.md",
-        '.claude' => "$workDir/.claude",
-    ];
-    foreach ($strayInstructions as $name => $path) {
-        if (file_exists($path) || is_link($path)) {
-            $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: instruction file present: $name",
-                'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
-            if (!is_link($childrenJsonl)) {
-                nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
-            }
-            return $summary;
+    foreach (nb_stray_instruction_names() as $name) {
+        if (file_exists("$workDir/$name") || is_link("$workDir/$name")) {
+            return $refuse("refusing to run: instruction file present: $name");
         }
     }
-
-    // Check log files are not symlinks and are regular files if they exist
-    if (is_link($mineLog)) {
-        $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: mine.log is a symlink",
-            'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
-        if (!is_link($childrenJsonl)) {
-            nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
-        }
-        return $summary;
-    }
-    if (file_exists($mineLog) && !is_file($mineLog)) {
-        $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: mine.log is not a regular file",
-            'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
-        if (!is_link($childrenJsonl) && (!file_exists($childrenJsonl) || (is_file($childrenJsonl) && !is_link($childrenJsonl)))) {
-            nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
-        }
-        return $summary;
-    }
-    if (is_link($childrenJsonl)) {
-        $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: children.jsonl is a symlink",
-            'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
-        // Don't write to children.jsonl if it's a symlink to avoid writing through the link
-        return $summary;
-    }
-    if (file_exists($childrenJsonl) && !is_file($childrenJsonl)) {
-        $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: children.jsonl is not a regular file",
-            'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
-        // Can't write the summary if children.jsonl is a folder
-        return $summary;
-    }
-
-    // Snapshot protected files with sha1 hashes
-    $protectedFiles = ['CLAUDE.md', 'comment_index.json', 'music_mentions_flagged.json'];
-    $chunkPattern = '/^chunk-[\w-]+\.md\z/';
-    $artistPattern = '/^artists\.chunk-[\w-]+\.md\z/';
-    $snapshot = []; // name => ['hash' => sha1, 'bytes' => contents] or null
-    $outputFile = "artists.$chunk";
-
-    // Check for symlinks or unreadable files in protected files, and snapshot them
-    foreach ($protectedFiles as $name) {
-        $path = "$workDir/$name";
+    foreach (['mine.log' => $mineLog, 'children.jsonl' => $childrenJsonl] as $name => $path) {
         if (is_link($path)) {
-            $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: protected file is a symlink: $name",
-                'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
-            if (!is_link($childrenJsonl)) {
-                nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
-            }
-            return $summary;
+            return $refuse("refusing to run: $name is a symlink");
         }
         if (file_exists($path) && !is_file($path)) {
-            $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: protected path is not a regular file: $name",
-                'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
-            if (!is_link($childrenJsonl)) {
-                nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
-            }
-            return $summary;
-        }
-        if (is_file($path)) {
-            if (!is_readable($path)) {
-                $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: protected file is unreadable: $name",
-                    'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
-                if (!is_link($childrenJsonl)) {
-                    nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
-                }
-                return $summary;
-            }
-            $bytes = file_get_contents($path);
-            if ($bytes === false) {
-                $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: protected file is unreadable: $name",
-                    'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
-                if (!is_link($childrenJsonl)) {
-                    nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
-                }
-                return $summary;
-            }
-            $snapshot[$name] = ['hash' => sha1_file($path), 'bytes' => $bytes, 'mode' => fileperms($path) & 0777];
-        } else {
-            $snapshot[$name] = null;
+            return $refuse("refusing to run: $name is not a regular file");
         }
     }
 
-    // Snapshot all chunk-*.md files
-    if (is_dir($workDir)) {
-        $files = @scandir($workDir);
-        if ($files) {
-            foreach ($files as $f) {
-                if (preg_match($chunkPattern, $f)) {
-                    $path = "$workDir/$f";
-                    if (is_link($path)) {
-                        $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: protected file is a symlink: $f",
-                            'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
-                        if (!is_link($childrenJsonl)) {
-                            nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
-                        }
-                        return $summary;
-                    }
-                    if (file_exists($path) && !is_file($path)) {
-                        $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: protected path is not a regular file: $f",
-                            'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
-                        if (!is_link($childrenJsonl)) {
-                            nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
-                        }
-                        return $summary;
-                    }
-                    if (is_file($path)) {
-                        if (!is_readable($path)) {
-                            $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: protected file is unreadable: $f",
-                                'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
-                            if (!is_link($childrenJsonl)) {
-                                nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
-                            }
-                            return $summary;
-                        }
-                        $bytes = file_get_contents($path);
-                        if ($bytes === false) {
-                            $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: protected file is unreadable: $f",
-                                'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
-                            if (!is_link($childrenJsonl)) {
-                                nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
-                            }
-                            return $summary;
-                        }
-                        $snapshot[$f] = ['hash' => sha1_file($path), 'bytes' => $bytes, 'mode' => fileperms($path) & 0777];
-                    } else {
-                        $snapshot[$f] = null;
-                    }
-                }
-            }
+    // Snapshot every protected file (null: it doesn't exist, and must not appear).
+    $names = ['CLAUDE.md', 'comment_index.json', 'music_mentions_flagged.json'];
+    foreach (is_dir($workDir) ? (@scandir($workDir) ?: []) : [] as $f) {
+        if (preg_match('/^chunk-[\w-]+\.md\z/', $f) || (preg_match('/^artists\.chunk-[\w-]+\.md\z/', $f) && $f !== $outputFile)) {
+            $names[] = $f;
         }
     }
-
-    // Snapshot all artists.chunk-*.md files except this run's output
-    if (is_dir($workDir)) {
-        $files = @scandir($workDir);
-        if ($files) {
-            foreach ($files as $f) {
-                if (preg_match($artistPattern, $f) && $f !== $outputFile) {
-                    $path = "$workDir/$f";
-                    if (is_link($path)) {
-                        $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: protected file is a symlink: $f",
-                            'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
-                        if (!is_link($childrenJsonl)) {
-                            nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
-                        }
-                        return $summary;
-                    }
-                    if (file_exists($path) && !is_file($path)) {
-                        $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: protected path is not a regular file: $f",
-                            'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
-                        if (!is_link($childrenJsonl)) {
-                            nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
-                        }
-                        return $summary;
-                    }
-                    if (is_file($path)) {
-                        if (!is_readable($path)) {
-                            $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: protected file is unreadable: $f",
-                                'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
-                            if (!is_link($childrenJsonl)) {
-                                nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
-                            }
-                            return $summary;
-                        }
-                        $bytes = file_get_contents($path);
-                        if ($bytes === false) {
-                            $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: protected file is unreadable: $f",
-                                'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
-                            if (!is_link($childrenJsonl)) {
-                                nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
-                            }
-                            return $summary;
-                        }
-                        $snapshot[$f] = ['hash' => sha1_file($path), 'bytes' => $bytes, 'mode' => fileperms($path) & 0777];
-                    } else {
-                        $snapshot[$f] = null;
-                    }
-                }
-            }
+    $snapshot = [];
+    foreach ($names as $name) {
+        $shot = nb_snapshot_file("$workDir/$name", $name);
+        if (is_string($shot)) {
+            return $refuse($shot);
         }
+        $snapshot[$name] = $shot;
     }
-
-    // Verify timeout binary is available before deleting output file
-    if ($timeout !== null) {
-        $timeoutBin = nb_find_timeout();
-        if (!$timeoutBin) {
-            $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "time limit requested but GNU coreutils `timeout` not found on PATH",
-                'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
-            if (!is_link($childrenJsonl)) {
-                nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
-            }
-            return $summary;
-        }
+    if (!nb_find_timeout()) {
+        return $refuse('time limit requested but GNU coreutils `timeout` not found on PATH');
     }
-
-    // Check output path is not a non-regular file (directories, etc.) but symlinks are handled separately
-    $outputPath = "$workDir/$outputFile";
     if (file_exists($outputPath) && !is_file($outputPath) && !is_link($outputPath)) {
-        $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: output path is not a regular file: $outputFile",
-            'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
-        if (!is_link($childrenJsonl) && (!file_exists($childrenJsonl) || (is_file($childrenJsonl) && !is_link($childrenJsonl)))) {
-            nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
-        }
-        return $summary;
+        return $refuse("refusing to run: output path is not a regular file: $outputFile");
     }
-
-    // Remove stale output file (the link itself, not its target) - only after we know we can run
-    if (is_link($outputPath)) {
-        @unlink($outputPath);
-    } elseif (is_file($outputPath)) {
-        if (!@unlink($outputPath)) {
-            $summary = ['chunk' => $chunk, 'ok' => false, 'error' => "refusing to run: could not remove the old output: $outputFile",
-                'duration_s' => 0.0, 'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
-            if (!is_link($childrenJsonl) && (!file_exists($childrenJsonl) || (is_file($childrenJsonl) && !is_link($childrenJsonl)))) {
-                nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
-            }
-            return $summary;
-        }
+    $lock = nb_child_folder_lock($workDir);
+    if ($lock === null) {
+        return $refuse('refusing to run: another child is running in this folder');
     }
-
-    // Track pre-existing unprotected files with their type, size, and mtime
-    $filesBefore = [];
-    if (is_dir($workDir)) {
-        $files = @scandir($workDir);
-        if ($files) {
-            foreach ($files as $f) {
-                if ($f !== '.' && $f !== '..' && $f !== 'mine.log' && $f !== 'children.jsonl' && $f !== $outputFile &&
-                    !isset($snapshot[$f])) {
-                    $path = "$workDir/$f";
-                    if (file_exists($path) || is_link($path)) {
-                        $filesBefore[$f] = [
-                            'type' => filetype($path),
-                            'size' => is_file($path) ? filesize($path) : null,
-                            'mtime' => filemtime($path),
-                        ];
-                    }
-                }
-            }
-        }
-    }
-
     try {
-        $r = nb_run_logged(nb_child_command($chunk, $workDir, $config), $workDir, $mineLog, $timeout);
-    } catch (Throwable $e) {
-        $summary = ['chunk' => $chunk, 'ok' => false, 'error' => $e->getMessage(), 'duration_s' => 0.0,
-            'cost_usd' => null, 'turns' => null, 'denials' => [], 'tampered' => []];
-        if (!is_link($childrenJsonl)) {
-            nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
+        // Remove a stale output (a symlink itself, never its target), so an old file can't pass for this run's.
+        if ((is_link($outputPath) || is_file($outputPath)) && !@unlink($outputPath)) {
+            return $refuse("refusing to run: could not remove the old output: $outputFile");
         }
-        return $summary;
-    }
-
-    $res = json_decode(trim($r['out']), true);
-    $wrote = is_file($outputPath) && !is_link($outputPath) && filesize($outputPath) > 0 &&
-        dirname(realpath($outputPath)) === realpath($workDir);
-    $ok = $r['exit'] === 0 && is_array($res) && ($res['type'] ?? null) === 'result' && empty($res['is_error']) && $wrote;
-    $error = null;
-    if (!$ok) {
-        if ($r['timed_out']) {
-            $error = sprintf('timed out after %gs', $timeout);
-        } elseif (!empty($res['is_error'])) {
-            // Build error from subtype, errors array, and result
-            $errorParts = [];
-            if (is_string($res['subtype'] ?? null) && $res['subtype'] !== '') {
-                $errorParts[] = $res['subtype'];
-            }
-            if (is_array($res['errors'] ?? null)) {
-                foreach ($res['errors'] as $err) {
-                    if (is_string($err) && $err !== '') {
-                        $errorParts[] = $err;
-                    }
-                }
-            }
-            if (is_string($res['result'] ?? null) && $res['result'] !== '') {
-                $errorParts[] = $res['result'];
-            }
-            if (!empty($errorParts)) {
-                $error = implode('; ', $errorParts);
-            } else {
-                $error = 'the child reported an error';
-            }
-        } elseif ($r['exit'] !== 0) {
-            $error = "exit {$r['exit']}";
-            if (is_array($res) && is_string($res['result'] ?? null) && !empty($res['result'])) {
-                $error .= ", {$res['result']}";
-            }
-        } elseif (!is_array($res)) {
-            $error = "no JSON result";
-        } elseif (($res['type'] ?? null) !== 'result') {
-            $error = "no JSON result";
-        } elseif (is_link($outputPath)) {
-            $error = "artists.$chunk written as a symlink";
-        } elseif (!is_file($outputPath)) {
-            $error = "no artists.$chunk written";
-            if (is_string($res['result'] ?? null) && trim($res['result']) !== '') {
-                // Its reply may say why (e.g. out of usage), which the pipeline checks for.
-                $error .= '; the child said: ' . mb_strimwidth(trim($res['result']), 0, 300, '…');
-            }
-        } elseif (filesize($outputPath) === 0) {
-            $error = "artists.$chunk is empty";
-        } elseif (dirname(realpath($outputPath)) !== realpath($workDir)) {
-            $error = "artists.$chunk is outside the folder";
-        } else {
-            $error = "no artists.$chunk written";
+        $skip = array_merge(['mine.log', 'children.jsonl', $outputFile], array_keys($snapshot));
+        $before = nb_scan_entries($workDir, $skip, null);
+        try {
+            $r = nb_run_logged(nb_child_command($chunk, $workDir, $config), $workDir, $mineLog, $timeout);
+        } catch (Throwable $e) {
+            return $refuse($e->getMessage());
         }
-    }
+        clearstatcache();
+        $res = json_decode(trim($r['out']), true);
+        $wrote = is_file($outputPath) && !is_link($outputPath) && filesize($outputPath) > 0
+            && dirname((string)realpath($outputPath)) === realpath($workDir);
+        $ok = $r['exit'] === 0 && is_array($res) && ($res['type'] ?? null) === 'result' && empty($res['is_error']) && $wrote;
+        $error = $ok ? null : nb_child_error($r, $res, $timeout, $outputPath, $outputFile, $workDir);
 
-    // Check for tampering
-    $tampered = [];
-    $restoreFailed = [];
-    foreach ($snapshot as $name => $original) {
-        $path = "$workDir/$name";
-        if ($original === null) {
-            // File didn't exist before
-            if (is_file($path) && !is_link($path)) {
-                // It exists now - it's tampering
-                $tampered[] = $name;
-            }
-        } else {
-            // File existed before - check if it was tampered
-            $tamperDetected = false;
-            if (is_link($path)) {
-                // Now it's a symlink - tampering
-                $tampered[] = $name;
-                $tamperDetected = true;
-                // Restore using helper
-                if (!nb_restore_file($workDir, $path, $original['bytes'], $original['mode'])) {
-                    $restoreFailed[] = $name;
-                }
-            } elseif (!is_file($path)) {
-                // Not a regular file (could be deleted, dir, etc.) - tampering
-                if (!$tamperDetected) {
+        // Tampering: protected files changed (put back), other entries created, changed or removed.
+        $tampered = [];
+        $restoreFailed = [];
+        foreach ($snapshot as $name => $original) {
+            $path = "$workDir/$name";
+            if ($original === null) {
+                if (is_file($path) && !is_link($path)) {
                     $tampered[] = $name;
                 }
-                if (is_dir($path)) {
-                    // Can't restore a directory
-                    $restoreFailed[] = $name;
-                } else {
-                    // Try to restore
-                    if (!nb_restore_file($workDir, $path, $original['bytes'], $original['mode'])) {
-                        $restoreFailed[] = $name;
-                    }
-                }
-            } elseif (sha1_file($path) !== $original['hash']) {
-                // File modified - tampering
+                continue;
+            }
+            if (!is_link($path) && is_file($path) && sha1_file($path) === $original['hash']) {
+                continue;
+            }
+            $tampered[] = $name;
+            if (!is_link($path) && is_dir($path)) {
+                $restoreFailed[] = $name; // a folder can't be replaced safely
+            } elseif (!nb_restore_file($workDir, $path, $original['bytes'], $original['mode'])) {
+                $restoreFailed[] = $name;
+            }
+        }
+        $after = nb_scan_entries($workDir, $skip, array_keys(array_filter($before, fn($e) => $e['type'] === 'dir')));
+        foreach ($after as $rel => $entry) {
+            if (!array_key_exists($rel, $before) || $entry !== $before[$rel]) {
+                $tampered[] = $rel;
+            }
+        }
+        foreach (array_diff_key($before, $after) as $rel => $_) {
+            $tampered[] = $rel;
+        }
+        foreach (['mine.log' => $mineLog, 'children.jsonl' => $childrenJsonl, $outputFile => $outputPath] as $name => $path) {
+            if (is_link($path)) {
                 $tampered[] = $name;
-                if (!nb_restore_file($workDir, $path, $original['bytes'], $original['mode'])) {
-                    $restoreFailed[] = $name;
-                }
             }
         }
-    }
-
-    // Check for new files or changes to pre-existing files
-    $filesAfter = [];
-    if (is_dir($workDir)) {
-        $files = @scandir($workDir);
-        if ($files) {
-            foreach ($files as $f) {
-                if ($f !== '.' && $f !== '..' && $f !== 'mine.log' && $f !== 'children.jsonl' && $f !== $outputFile &&
-                    !isset($snapshot[$f])) {
-                    $filesAfter[$f] = true;
-                    $path = "$workDir/$f";
-                    if (isset($filesBefore[$f])) {
-                        // Pre-existing file - check if it changed
-                        $newType = filetype($path);
-                        $newMtime = filemtime($path);
-                        $newSize = is_file($path) ? filesize($path) : null;
-                        if ($newType !== $filesBefore[$f]['type'] || $newMtime !== $filesBefore[$f]['mtime'] ||
-                            ($newSize !== null && $newSize !== $filesBefore[$f]['size'])) {
-                            $tampered[] = $f;
-                        }
-                    } elseif (file_exists($path) || is_link($path)) {
-                        // New file/dir created
-                        $tampered[] = $f;
-                    }
-                }
-            }
+        $tampered = array_values(array_unique($tampered));
+        sort($tampered);
+        if ($tampered) {
+            $ok = false;
+            $error = 'child changed files it must not touch: ' . implode(', ', $tampered)
+                . ($restoreFailed ? '; could not restore ' . implode(', ', $restoreFailed) : '');
         }
+        $denials = array_map(fn($d) => ($d['tool_name'] ?? '?') . ': ' . json_encode($d['tool_input'] ?? [], JSON_UNESCAPED_SLASHES),
+            is_array($res['permission_denials'] ?? null) ? $res['permission_denials'] : []);
+        return nb_child_summary($childrenJsonl, $chunk, $ok, $error, $r['duration_s'], $res['total_cost_usd'] ?? null,
+            $res['num_turns'] ?? null, $denials, $tampered);
+    } finally {
+        flock($lock, LOCK_UN);
+        fclose($lock);
     }
+}
 
-    // Check for removed pre-existing files
-    foreach ($filesBefore as $f => $info) {
-        if (!isset($filesAfter[$f])) {
-            $tampered[] = $f;
-        }
-    }
-
-    // Check if output is a symlink (which is tampering)
-    if (is_link($outputPath)) {
-        if (!in_array($outputFile, $tampered, true)) {
-            $tampered[] = $outputFile;
-        }
-    }
-
-    // Check if log files became symlinks (tampering)
-    if (is_link($mineLog)) {
-        if (!in_array('mine.log', $tampered, true)) {
-            $tampered[] = 'mine.log';
-        }
-    }
-    if (is_link($childrenJsonl)) {
-        if (!in_array('children.jsonl', $tampered, true)) {
-            $tampered[] = 'children.jsonl';
-        }
-    }
-
-    $tampered = array_unique($tampered);
-    sort($tampered);
-
-    if (!empty($tampered)) {
-        $ok = false;
-        $baseError = "child changed files it must not touch: " . implode(', ', $tampered);
-        if (!empty($restoreFailed)) {
-            $baseError .= "; could not restore " . implode(', ', $restoreFailed);
-        }
-        $error = $baseError;
-    }
-
-    $denials = array_map(fn($d) => ($d['tool_name'] ?? '?') . ': ' . json_encode($d['tool_input'] ?? [], JSON_UNESCAPED_SLASHES),
-        is_array($res['permission_denials'] ?? null) ? $res['permission_denials'] : []);
-    $summary = ['chunk' => $chunk, 'ok' => $ok, 'error' => $error, 'duration_s' => $r['duration_s'],
-        'cost_usd' => $res['total_cost_usd'] ?? null, 'turns' => $res['num_turns'] ?? null, 'denials' => $denials, 'tampered' => $tampered];
-    if (!is_link($childrenJsonl)) {
-        nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
-    }
+/** A run's summary, appended to children.jsonl (unless that isn't a safe regular file) and returned. */
+function nb_child_summary(string $childrenJsonl, string $chunk, bool $ok, ?string $error, float $durationS = 0.0,
+    mixed $costUsd = null, mixed $turns = null, array $denials = [], array $tampered = []): array
+{
+    $summary = ['chunk' => $chunk, 'ok' => $ok, 'error' => $error, 'duration_s' => $durationS, 'cost_usd' => $costUsd,
+        'turns' => $turns, 'denials' => $denials, 'tampered' => $tampered];
+    nb_append_jsonl($childrenJsonl, json_encode($summary, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE));
     return $summary;
+}
+
+/** Top-level names of the instruction files a child must never find in its folder (all but its own CLAUDE.md). */
+function nb_stray_instruction_names(): array
+{
+    $names = array_map(fn($f) => explode('/', $f)[0], NB_INSTRUCTION_FILES);
+    return array_values(array_unique(array_diff($names, ['CLAUDE.md'])));
+}
+
+/**
+ * Snapshot one protected file: ['hash', 'bytes', 'mode'], null if it doesn't exist, or a string saying why the child
+ * must not run (it's a symlink, not a regular file, or unreadable).
+ */
+function nb_snapshot_file(string $path, string $name): array|string|null
+{
+    if (is_link($path)) {
+        return "refusing to run: protected file is a symlink: $name";
+    }
+    if (file_exists($path) && !is_file($path)) {
+        return "refusing to run: protected path is not a regular file: $name";
+    }
+    if (!is_file($path)) {
+        return null;
+    }
+    $bytes = is_readable($path) ? @file_get_contents($path) : false;
+    if ($bytes === false) {
+        return "refusing to run: protected file is unreadable: $name";
+    }
+    return ['hash' => sha1($bytes), 'bytes' => $bytes, 'mode' => fileperms($path) & 0777];
+}
+
+/**
+ * Every entry in $dir except $skip, as relative path => [type, size, mtime] from lstat (a symlink is itself, never
+ * followed; a retargeted link changes). Descends into the folders named in $descend (null: every real folder), so a
+ * change inside a folder that was already there is seen; a new folder is one entry.
+ */
+function nb_scan_entries(string $dir, array $skip, ?array $descend, string $prefix = ''): array
+{
+    $out = [];
+    foreach (is_dir($dir) ? (@scandir($dir) ?: []) : [] as $f) {
+        $rel = $prefix . $f;
+        if ($f === '.' || $f === '..' || ($prefix === '' && in_array($f, $skip, true))) {
+            continue;
+        }
+        $st = @lstat("$dir/$f");
+        if ($st === false) {
+            continue;
+        }
+        $type = is_link("$dir/$f") ? 'link' : (is_dir("$dir/$f") ? 'dir' : 'file');
+        $out[$rel] = ['type' => $type, 'size' => $type === 'dir' ? null : $st['size'], 'mtime' => $st['mtime']];
+        if ($type === 'dir' && ($descend === null || in_array($rel, $descend, true))) {
+            $out += nb_scan_entries("$dir/$f", $skip, $descend, "$rel/");
+        }
+    }
+    return $out;
+}
+
+/** An exclusive lock on the child folder (held for one run), or null if another run holds it. */
+function nb_child_folder_lock(string $workDir)
+{
+    $key = sha1((string)(realpath($workDir) ?: $workDir));
+    $h = @fopen(sys_get_temp_dir() . "/nb-child-$key.lock", 'c');
+    if ($h === false) {
+        return null;
+    }
+    if (!flock($h, LOCK_EX | LOCK_NB)) {
+        fclose($h);
+        return null;
+    }
+    return $h;
+}
+
+/** Why a finished child isn't ok, in words: timed out, its own error result, an exit code, or no usable output. */
+function nb_child_error(array $r, mixed $res, float $timeout, string $outputPath, string $outputFile, string $workDir): string
+{
+    if ($r['timed_out']) {
+        return sprintf('timed out after %gs', $timeout);
+    }
+    if (!empty($res['is_error'])) { // an error result may have no "result": build it from subtype and errors
+        $parts = is_string($res['subtype'] ?? null) && $res['subtype'] !== '' ? [$res['subtype']] : [];
+        foreach (is_array($res['errors'] ?? null) ? $res['errors'] : [] as $err) {
+            if (is_string($err) && $err !== '') {
+                $parts[] = $err;
+            }
+        }
+        if (is_string($res['result'] ?? null) && $res['result'] !== '') {
+            $parts[] = $res['result'];
+        }
+        return $parts ? implode('; ', $parts) : 'the child reported an error';
+    }
+    if ($r['exit'] !== 0) {
+        $said = is_array($res) && is_string($res['result'] ?? null) && $res['result'] !== '' ? ", {$res['result']}" : '';
+        return "exit {$r['exit']}$said";
+    }
+    if (!is_array($res) || ($res['type'] ?? null) !== 'result') {
+        return 'no JSON result';
+    }
+    if (is_link($outputPath)) {
+        return "$outputFile written as a symlink";
+    }
+    if (!is_file($outputPath)) {
+        $said = is_string($res['result'] ?? null) && trim($res['result']) !== ''
+            ? '; the child said: ' . mb_strimwidth(trim($res['result']), 0, 300, '…') : ''; // e.g. out of usage
+        return "no $outputFile written$said";
+    }
+    if (filesize($outputPath) === 0) {
+        return "$outputFile is empty";
+    }
+    return dirname((string)realpath($outputPath)) !== realpath($workDir) ? "$outputFile is outside the folder" : "no $outputFile written";
 }
 
 /** Run mining/coverage.py on a video folder and return its result (throws if it fails). */
@@ -774,7 +570,8 @@ function nb_coverage(string $dir, bool $writeExtra, string $logFile, float $time
     if ($timeoutS <= 0) {
         throw new InvalidArgumentException("timeoutS must be positive, got $timeoutS");
     }
-    $cmd = array_merge(['python3', nb_root() . '/mining/coverage.py', $dir], $writeExtra ? ['--write-extra'] : []);
+    $python = getenv('NB_PYTHON_BIN') ?: (nb_find_bin('python3') ?? 'python3');
+    $cmd = array_merge([$python, nb_root() . '/mining/coverage.py', $dir], $writeExtra ? ['--write-extra'] : []);
     $r = nb_run_logged($cmd, nb_root(), $logFile, $timeoutS);
     $cov = json_decode(trim($r['out']), true);
     if ($r['exit'] !== 0 || !is_array($cov)) {

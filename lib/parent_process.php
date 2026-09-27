@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+require_once __DIR__ . '/db.php';
 
 /**
  * One long-lived `claude -p --input-format stream-json` process. Each message is one JSON line on stdin;
@@ -70,7 +71,7 @@ final class NbParentProcess
             return $fail('could not send the message to the agent process');
         }
 
-        $deadline = microtime(true) + $timeoutS;
+        $deadline = nb_clock() + $timeoutS;
         while (true) {
             while (($nl = strpos($this->buf, "\n")) !== false) {
                 $raw = substr($this->buf, 0, $nl);
@@ -95,7 +96,7 @@ final class NbParentProcess
                     return ['result' => $event, 'events' => $events, 'error' => null];
                 }
             }
-            $left = $deadline - microtime(true);
+            $left = $deadline - nb_clock();
             if ($left <= 0) {
                 return $fail(sprintf('no reply from the agent after %d seconds', (int)$timeoutS));
             }
@@ -123,8 +124,8 @@ final class NbParentProcess
             return null;
         }
         @fclose($this->stdin);
-        $until = microtime(true) + $graceS;
-        while (($st = proc_get_status($this->proc))['running'] && microtime(true) < $until) {
+        $until = nb_clock() + $graceS;
+        while (($st = proc_get_status($this->proc))['running'] && nb_clock() < $until) {
             usleep(50000);
         }
         if ($st['running']) {

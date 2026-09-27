@@ -434,7 +434,21 @@ if (!is_link($link)) {
 $cmd = nb_child_command('chunk-01.md', $link, $config);
 check($cmd[12] === $editRule, 'a symlinked folder gives the real path in the Edit rule');
 putenv('NB_CLAUDE_BIN');
-check(nb_child_command('chunk-01.md', $dir, $config)[0] === 'claude', 'the program is `claude` when NB_CLAUDE_BIN is unset');
+check(nb_child_command('chunk-01.md', $dir, $config)[0] === (nb_find_bin('claude') ?? 'claude'),
+    'the program is claude, by its absolute path on PATH, when NB_CLAUDE_BIN is unset');
+$relDir = "$base/relpath";
+@mkdir($relDir, 0777, true);
+file_put_contents("$relDir/claude", "#!/bin/sh\necho planted\n");
+chmod("$relDir/claude", 0755);
+$oldPath = getenv('PATH');
+$oldCwd = getcwd();
+chdir($base);
+putenv("PATH=relpath:.:$oldPath");
+$found = nb_find_bin('claude');
+putenv("PATH=$oldPath");
+chdir($oldCwd);
+check($found === null || ($found[0] === '/' && $found !== realpath("$relDir/claude")),
+    "a claude in a relative PATH entry (like one a child wrote into its folder) is never picked");
 putenv("NB_CLAUDE_BIN=$fake");
 
 echo "a child run\n";
@@ -1001,6 +1015,44 @@ putenv('NB_FAKE_CHILD_TAMPER=inforemove');
 nb_run_child('chunk-01.md', $dir, $config);
 putenv('NB_FAKE_CHILD_TAMPER');
 check(!file_exists("$dir/video.info.json"), 'and a removed one stays removed');
+
+echo "inside folders that were already there, and links\n";
+foreach (['subdirfile' => 'stuff/inner.txt', 'subdirnew' => 'stuff/new.txt'] as $what => $path) {
+    $dir = $infoDir("watch_$what");
+    mkdir("$dir/stuff");
+    file_put_contents("$dir/stuff/inner.txt", "inner\n");
+    putenv("NB_FAKE_CHILD_TAMPER=$what");
+    [$r, $warnings] = $capture(fn() => nb_run_child('chunk-01.md', $dir, $config));
+    putenv('NB_FAKE_CHILD_TAMPER');
+    check($r['ok'] === false && in_array($path, $r['tampered'], true) && $warnings === [],
+        "$path changed inside a folder that was already there: caught (" . json_encode($r['tampered']) . ')');
+}
+$dir = $infoDir('watch_dangling');
+symlink("$dir/nowhere", "$dir/pointer");
+[$r, $warnings] = $capture(fn() => nb_run_child('chunk-01.md', $dir, $config));
+check($r['ok'] === true && $r['tampered'] === [] && $warnings === [], 'a dangling symlink already in the folder: no false alarm and no PHP warnings');
+putenv('NB_FAKE_CHILD_TAMPER=relink');
+[$r, $warnings] = $capture(fn() => nb_run_child('chunk-01.md', $dir, $config));
+putenv('NB_FAKE_CHILD_TAMPER');
+check($r['ok'] === false && $r['tampered'] === ['pointer'] && $warnings === [], 'a symlink pointed somewhere else is caught');
+
+echo "one child per folder at a time\n";
+$dir = $infoDir('lock');
+$held = nb_child_folder_lock($dir);
+$r = nb_run_child('chunk-01.md', $dir, $config);
+check($r['ok'] === false && $r['error'] === 'refusing to run: another child is running in this folder', 'a second run in the same folder is refused');
+flock($held, LOCK_UN);
+fclose($held);
+check(nb_run_child('chunk-01.md', $dir, $config)['ok'] === true, 'and runs once the first is done');
+
+echo "small things in the helpers\n";
+check(nb_stray_instruction_names() === ['CLAUDE.local.md', '.claude', 'AGENTS.md'],
+    'the stray instruction names come from NB_INSTRUCTION_FILES (so the two lists cannot drift)');
+$target = "$base/append_target.txt";
+@unlink($target);
+@unlink("$base/dangling.jsonl");
+symlink($target, "$base/dangling.jsonl");
+check(nb_append_jsonl("$base/dangling.jsonl", '{}') === false && !file_exists($target), 'nb_append_jsonl never writes through a dangling symlink');
 
 echo "permission denials\n";
 $dir = $video('denials');
