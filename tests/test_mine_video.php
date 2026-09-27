@@ -95,7 +95,8 @@ foreach (['NB_ENV_FILE' => $keyEnv, 'NB_PYTHON_BIN' => $pyBin, 'NB_FAKE_PY_LOG' 
     'NB_CLAUDE_BIN' => $probing('probe_child', 'claude', 'fake_mining_child.php')] as $k => $v) {
     putenv("$k=$v");
 }
-$fakeTs = ['NB_FAKE_TS_FAILED', 'NB_FAKE_TS_EXIT', 'NB_FAKE_TS_NOFILE', 'NB_FAKE_TS_OMIT_FAILED', 'NB_FAKE_TS_MESSAGE'];
+$fakeTs = ['NB_FAKE_TS_FAILED', 'NB_FAKE_TS_EXIT', 'NB_FAKE_TS_NOFILE', 'NB_FAKE_TS_OMIT_FAILED', 'NB_FAKE_TS_MESSAGE',
+    'NB_FAKE_TS_COUNTS'];
 /** Mine $vid with the fake TypeSafe switches in $switches; returns [exit code, output, mining row]. */
 $mineTs = function (string $vid, array $switches = []) use ($pdo, $mine, $row, $fakeTs, $pyLog, $statusLog): array {
     @unlink($pyLog);
@@ -121,6 +122,9 @@ $ts = array_values(array_filter($lines($pyLog), fn($c) => $c['script'] === 'find
 $arg = fn(string $flag) => $ts[array_search($flag, $ts, true) + 1] ?? null;
 check(in_array('--input', $ts, true) && $arg('--env') === $keyEnv && $arg('--song-threshold') === '0.8'
     && $arg('--artist-threshold') === '0.8', 'TypeSafe: called with the info file, the .env path and both thresholds');
+check($arg('--other-artist-threshold') === '0.3' && $arg('--injection-threshold') === '0.5' && $arg('--spam-threshold') === '0.9',
+    'and the other-artist, injection and spam thresholds from the config');
+check($r['notes'] === null, 'nothing skipped or quarantined: no notes');
 check(array_column($lines($pyLog), 'script') === ['find_music_mentions.py', 'prepare.py', 'merge_leads.py'],
     'TypeSafe: the pipeline runs the filter, prepare and merge through NB_PYTHON_BIN, in that order');
 $seen = [];
@@ -146,6 +150,12 @@ check(str_contains((string)$r['error'], 'the API key was rejected (HTTP 401)'),
 [$code, $out, $r] = $mineTs('V0000000008', ['NB_FAKE_TS_NOFILE' => '1']);
 check($code === 1 && $r['status'] === 'failed' && str_starts_with((string)$r['error'], 'typesafe filter failed'),
     'TypeSafe wrote no flagged file: the video fails, naming the filter');
+
+[$code, $out, $r] = $mineTs('V0000000013', ['NB_FAKE_TS_COUNTS' => '{"quarantined": 2, "own_artist_skipped": 5, "spam_skipped": 1}']);
+check($code === 0 && $r['status'] === 'done' && str_contains((string)$r['notes'], '2 comments looked like instructions to an AI')
+    && str_contains((string)$r['notes'], 'quarantined.jsonl') && str_contains((string)$r['notes'], '5 only name the video')
+    && str_contains((string)$r['notes'], '1 spam'), "what the filter skipped or quarantined is in the row's notes");
+check(str_contains($out, '2 comments looked like instructions to an AI'), 'and in the output');
 
 [$code, $out, $r] = $mineTs('V0000000009', ['NB_FAKE_TS_OMIT_FAILED' => '1']);
 check($code === 0 && $r['status'] === 'done' && $r['error'] === null, 'a flagged file without a "failed" count is read as none failed');

@@ -9,7 +9,7 @@ const NB_NOTE_HISTORY_AFTER_S = 600; // keep an old note only if last changed 10
 const NB_VIDEO_ID_RE = '/^[A-Za-z0-9_-]{11}$/';
 const NB_MINE_RATINGS = ['top', 'yes']; // rating a song one of these queues its comments for mining
 const NB_MINING_STATUSES = ['queued', 'downloading', 'filtering', 'extracting', 'done', 'failed'];
-const NB_MINING_FIELDS = ['status', 'filter', 'error', 'comments', 'flagged', 'covered', 'mentions'];
+const NB_MINING_FIELDS = ['status', 'filter', 'error', 'comments', 'flagged', 'covered', 'mentions', 'notes'];
 const NB_LEAD_STRENGTHS = ['confirmed', 'hint'];
 
 function nb_root(): string
@@ -71,7 +71,7 @@ function nb_create_tables(PDO $pdo): void
         'CREATE TABLE IF NOT EXISTS mining (
             video_id TEXT PRIMARY KEY, status TEXT NOT NULL, filter TEXT, error TEXT,
             comments INTEGER, flagged INTEGER, covered INTEGER, mentions INTEGER,
-            queued_at TEXT NOT NULL, updated_at TEXT NOT NULL)',
+            queued_at TEXT NOT NULL, updated_at TEXT NOT NULL, notes TEXT)',
         'CREATE TABLE IF NOT EXISTS leads (
             name_key TEXT PRIMARY KEY, name TEXT NOT NULL, strength TEXT NOT NULL,
             people INTEGER NOT NULL, videos INTEGER NOT NULL, mentions INTEGER NOT NULL, likes INTEGER NOT NULL,
@@ -79,6 +79,11 @@ function nb_create_tables(PDO $pdo): void
             examples_json TEXT NOT NULL, updated_at TEXT NOT NULL)',
     ] as $sql) {
         $pdo->exec($sql);
+    }
+    // Columns added after a table was first made: add them to databases created before.
+    $mining = array_column($pdo->query('PRAGMA table_info(mining)')->fetchAll(), 'name');
+    if (!in_array('notes', $mining, true)) {
+        $pdo->exec('ALTER TABLE mining ADD COLUMN notes TEXT'); // what the filter skipped, e.g. quarantined comments
     }
 }
 

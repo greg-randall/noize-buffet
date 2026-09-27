@@ -27,11 +27,27 @@ CUES = [
     re.compile(r"[\"“][^\"“”]{2,80}[\"”]"),                          # a quoted title
 ]
 REPLY_MENTION_RE = re.compile("\xa0@[^\xa0]+\xa0")  # YouTube wraps reply @handles in non-breaking spaces
+# Comments that look like instructions to an AI are quarantined, never flagged: written with their text to
+# quarantined.jsonl and counted. Cruder than TypeSafe's question and easy to word around; confinement of the
+# extraction child is the real protection, this only keeps the obvious attempts away from it.
+INJECTION = [
+    re.compile(r"\b(ignore|disregard|forget|override)\b[^.!?\n]{0,40}\b(instructions?|prompts?|rules|guidelines)\b",
+               re.I),
+    re.compile(r"\b(system prompt|jailbreak|prompt injection)\b", re.I),
+    re.compile(r"\b(you are|you're|as) (an? )?(ai|a\.i\.|assistant|language model|llm|chatbot|bot)\b", re.I),
+    re.compile(r"\b(ai|a\.i\.|assistant|llm|chatgpt|gpt|claude|haiku|model|bot)s?\b[^.!?\n]{0,40}\b(must|should|"
+               r"please|now)\b[^.!?\n]{0,20}\b(write|delete|run|execute|output|reveal|print|read|say|reply|list)\b",
+               re.I),
+]
 
 
 def flag(text: str) -> bool:
     text = REPLY_MENTION_RE.sub(" ", text)
     return any(p.search(text) for p in CUES)
+
+
+def looks_like_injection(text: str) -> bool:
+    return any(p.search(text) for p in INJECTION)
 
 
 def load_comments(path: Path) -> list:
@@ -56,11 +72,16 @@ def main():
     ap.add_argument("--input", type=Path, required=True, help="yt-dlp .info.json with comments")
     args = ap.parse_args()
     comments = load_comments(args.input)
-    flagged = [c for c in comments if flag(c["text"])]
-    out = args.input.resolve().parent / "music_mentions_flagged.json"
-    out.write_text(json.dumps({"filter": "keyword", "comments_checked": len(comments), "flagged": flagged},
-                              indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"{len(flagged):,} of {len(comments):,} comments flagged by keywords -> {out}", file=sys.stderr)
+    quarantined = [c for c in comments if looks_like_injection(c["text"])]
+    flagged = [c for c in comments if flag(c["text"]) and not looks_like_injection(c["text"])]
+    folder = args.input.resolve().parent
+    (folder / "quarantined.jsonl").write_text("".join(json.dumps(c, ensure_ascii=False) + "\n" for c in quarantined),
+                                              encoding="utf-8")
+    out = folder / "music_mentions_flagged.json"
+    out.write_text(json.dumps({"filter": "keyword", "comments_checked": len(comments), "quarantined": len(quarantined),
+                               "flagged": flagged}, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"{len(flagged):,} of {len(comments):,} comments flagged by keywords -> {out}; {len(quarantined):,} "
+          f"quarantined as instructions to an AI (quarantined.jsonl)", file=sys.stderr)
 
 
 if __name__ == "__main__":

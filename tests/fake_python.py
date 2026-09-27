@@ -12,6 +12,7 @@ or, if that is not set, the comments mining/keyword_filter.py would flag. Switch
   NB_FAKE_TS_EXIT=N          exit with code N (default 0). The real script exits non-zero when some calls failed
   NB_FAKE_TS_NOFILE=1        write no flagged file
   NB_FAKE_TS_OMIT_FAILED=1   leave the "failed" key out of the flagged file
+  NB_FAKE_TS_COUNTS=json     extra keys for the flagged file, e.g. {"quarantined": 2, "own_artist_skipped": 5}
   NB_FAKE_TS_MESSAGE=text    the last line printed to stderr when the exit code is not 0 (like the real script's
                              sys.exit("message"): plain text, no "ERROR"). Default: an API key message, or, with
                              NB_FAKE_TS_FAILED set, the real script's "N comments failed at TypeSafe; ..." message
@@ -70,6 +71,7 @@ def fake_typesafe(args: list) -> None:
     if not os.environ.get("NB_FAKE_TS_NOFILE"):
         out = {"song_threshold": 0.8, "artist_threshold": 0.8, "comments_checked": len(comments) - failed,
                "comments_total": len(comments), "failed": failed, "flagged": flagged}
+        out.update(json.loads(os.environ.get("NB_FAKE_TS_COUNTS") or "{}"))
         if os.environ.get("NB_FAKE_TS_OMIT_FAILED"):
             del out["failed"]
         (info_path.resolve().parent / "music_mentions_flagged.json").write_text(

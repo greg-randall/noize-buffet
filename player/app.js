@@ -340,6 +340,7 @@ function renderMining(res) {
       $('<td>').text(v.artist ? `${v.artist} - ${v.title}` : v.video_id), $('<td>').text(v.status),
       $('<td>').text(filter), $('<td>').text(v.comments ?? ''), $('<td>').text(v.flagged ?? ''),
       $('<td>').text(v.covered ?? ''), $('<td>').text(v.mentions ?? ''),
+      $('<td class="text-body-secondary">').text(v.notes || ''),
       $('<td class="text-warning">').text(v.error || '')).appendTo($tb);
   });
 }

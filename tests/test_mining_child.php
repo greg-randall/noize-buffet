@@ -83,7 +83,8 @@ $lastCall = function () use ($argsFile, $jsonl): array {
 
 echo "mining settings in the config\n";
 $expected = ['mining_workers' => 2, 'mining_comment_cap' => 3000, 'mining_chunk_size' => 150, 'mining_child_model' => 'haiku',
-    'mining_child_timeout_s' => 600, 'typesafe_song_threshold' => 0.8, 'typesafe_artist_threshold' => 0.8];
+    'mining_child_timeout_s' => 600, 'typesafe_song_threshold' => 0.8, 'typesafe_artist_threshold' => 0.8,
+    'typesafe_other_artist_threshold' => 0.3, 'typesafe_injection_threshold' => 0.5, 'typesafe_spam_threshold' => 0.9];
 $fromFile = json_decode((string)file_get_contents(nb_root() . '/config.json'), true);
 check(is_array($fromFile), 'config.json is valid JSON');
 $noFile = nb_config(tmp_dir() . '/no_such_config.json');

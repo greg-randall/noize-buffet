@@ -53,6 +53,18 @@ check($threw, 'update on a video with no mining row throws');
 check(nb_mining_recover_interrupted($pdo) === 1 && $row('M0000000002')['status'] === 'queued', 'an interrupted video goes back to the queue');
 check(nb_mining_next(fresh_db('test_mining_empty')) === null, 'next returns null on an empty queue');
 
+echo "a database from before the notes column\n";
+$oldPath = tmp_dir() . '/test_mining_old.sqlite';
+@unlink($oldPath);
+$old = new PDO("sqlite:$oldPath");
+$old->exec("CREATE TABLE mining (video_id TEXT PRIMARY KEY, status TEXT NOT NULL, filter TEXT, error TEXT,
+    comments INTEGER, flagged INTEGER, covered INTEGER, mentions INTEGER, queued_at TEXT NOT NULL, updated_at TEXT NOT NULL)");
+$old->exec("INSERT INTO mining (video_id, status, queued_at, updated_at) VALUES ('O0000000001', 'done', 'x', 'x')");
+$old = null;
+$upgraded = nb_db($oldPath);
+nb_mining_update($upgraded, 'O0000000001', ['notes' => 'hello']);
+check(nb_mining_list($upgraded)[0]['notes'] === 'hello', 'an older database gets the notes column, and keeps its rows');
+
 echo "failed videos are retried after a day\n";
 $f = fresh_db('test_mining_retry');
 foreach (['F0000000001', 'F0000000002', 'F0000000003'] as $vid) {

@@ -102,7 +102,7 @@
         <div class="small text-body-secondary mb-1">Songs you rate top or yes, and songs you name, get their YouTube comments read for other artists people mention.</div>
         <div class="table-responsive">
           <table class="table table-sm small mb-0">
-            <thead><tr><th>Song</th><th>Status</th><th>Filter</th><th>Comments</th><th>Flagged</th><th>Covered</th><th>Mentions</th><th>Problems</th></tr></thead>
+            <thead><tr><th>Song</th><th>Status</th><th>Filter</th><th>Comments</th><th>Flagged</th><th>Covered</th><th>Mentions</th><th>Notes</th><th>Problems</th></tr></thead>
             <tbody id="mining-list"></tbody>
           </table>
         </div>

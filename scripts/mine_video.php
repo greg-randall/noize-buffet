@@ -103,7 +103,10 @@ try {
         $say(sprintf('filtering with TypeSafe, at least %.1f min at its rate limit…', $comments / 1150));
         $cmd = $py('find_music_mentions.py', ['--input', $info, '--env', nb_env_file(),
             '--song-threshold', (string)$config['typesafe_song_threshold'],
-            '--artist-threshold', (string)$config['typesafe_artist_threshold']]);
+            '--artist-threshold', (string)$config['typesafe_artist_threshold'],
+            '--other-artist-threshold', (string)$config['typesafe_other_artist_threshold'],
+            '--injection-threshold', (string)$config['typesafe_injection_threshold'],
+            '--spam-threshold', (string)$config['typesafe_spam_threshold']]);
     } else {
         $filter = 'keyword';
         $say('WARNING: no TypeSafe key in .env, so using the keyword filter: it finds only about half of the comments that name other artists, and about half of what it flags names nothing');
@@ -118,14 +121,30 @@ try {
     $problems = [];
     // TypeSafe exits non-zero when some calls failed but still writes what it finished; carry on with that
     // and record it, so one comment TypeSafe always rejects can't stop the video from ever finishing.
-    $failedCalls = (int)(json_decode((string)file_get_contents($flaggedFile), true)['failed'] ?? 0);
+    $filtered = json_decode((string)file_get_contents($flaggedFile), true);
+    $failedCalls = (int)($filtered['failed'] ?? 0);
     if ($r['exit'] !== 0 && $failedCalls === 0) {
         $fail("$filter filter failed: " . $errorLine($offset));
     }
     if ($failedCalls > 0) {
         $problems[] = "$failedCalls comments failed at TypeSafe and were not checked (mining this video again retries them)";
     }
-    nb_mining_update($pdo, $vid, ['filter' => $filter]);
+    // What the filter kept away from the extraction child, counted so nothing disappears silently.
+    $notes = [];
+    if (($n = (int)($filtered['quarantined'] ?? 0)) > 0) {
+        $notes[] = "$n comments looked like instructions to an AI and were not sent to Claude (their text is in "
+            . "comments/$vid/quarantined.jsonl)";
+    }
+    if (($n = (int)($filtered['own_artist_skipped'] ?? 0)) > 0) {
+        $notes[] = "$n only name the video's own artist, skipped";
+    }
+    if (($n = (int)($filtered['spam_skipped'] ?? 0)) > 0) {
+        $notes[] = "$n spam or self-promotion, skipped";
+    }
+    nb_mining_update($pdo, $vid, ['filter' => $filter, 'notes' => $notes ? implode('; ', $notes) : null]);
+    foreach ($notes as $note) {
+        $say($note);
+    }
 
     // 3. Number the flagged comments and split them into chunks.
     $r = nb_run_logged($py('prepare.py', [$dir, '--chunk-size', (string)$chunkSize]), nb_root(), $log, NB_SCRIPT_TIMEOUT_S);
