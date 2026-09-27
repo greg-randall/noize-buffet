@@ -617,6 +617,10 @@ function nb_run_child(string $chunk, string $workDir, array $config): array
             $error = "artists.$chunk written as a symlink";
         } elseif (!is_file($outputPath)) {
             $error = "no artists.$chunk written";
+            if (is_string($res['result'] ?? null) && trim($res['result']) !== '') {
+                // Its reply may say why (e.g. out of usage), which the pipeline checks for.
+                $error .= '; the child said: ' . mb_strimwidth(trim($res['result']), 0, 300, '…');
+            }
         } elseif (filesize($outputPath) === 0) {
             $error = "artists.$chunk is empty";
         } elseif (dirname(realpath($outputPath)) !== realpath($workDir)) {

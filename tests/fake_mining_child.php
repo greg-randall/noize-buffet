@@ -9,6 +9,7 @@ declare(strict_types=1);
 // Comments containing SKIPME are left out, except in chunk-extra.md (to exercise the coverage re-run).
 // Switches (environment variables):
 //   NB_FAKE_CHILD_FAIL=1     error result ("fake failure"), exit 1, nothing written
+//   NB_FAKE_CHILD_LIMIT=1    error result saying the weekly usage limit is reached, exit 1, nothing written
 //   NB_FAKE_CHILD_SLEEP=N    sleep N seconds first
 //   NB_FAKE_CHILD_NOWRITE=1  a normal success result, exit 0, but no output file written
 //   NB_FAKE_CHILD_NOTJSON=1  writes the output file, but prints plain text instead of a JSON result, exit 0
@@ -44,6 +45,10 @@ if (getenv('NB_FAKE_CHILD_STDERR')) {
 }
 if (getenv('NB_FAKE_CHILD_SLEEP')) {
     sleep((int)getenv('NB_FAKE_CHILD_SLEEP'));
+}
+if (getenv('NB_FAKE_CHILD_LIMIT')) {
+    echo json_encode(['type' => 'result', 'is_error' => true, 'result' => "You've hit your weekly limit · resets 2pm (America/New_York)"]), "\n";
+    exit(1);
 }
 if (getenv('NB_FAKE_CHILD_FAIL')) {
     echo json_encode(['type' => 'result', 'is_error' => true, 'result' => 'fake failure']), "\n";

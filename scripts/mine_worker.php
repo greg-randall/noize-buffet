@@ -30,6 +30,7 @@ $finished = function (string $vid, int $exit) use ($pdo): void {
 };
 
 $running = []; // video_id => process
+$wasPaused = false;
 while (true) {
     foreach ($running as $vid => $proc) {
         $status = proc_get_status($proc);
@@ -39,7 +40,16 @@ while (true) {
             $finished((string)$vid, $status['signaled'] ? 128 + $status['termsig'] : $status['exitcode']);
         }
     }
-    while (count($running) < $slots && ($job = nb_mining_next($pdo)) !== null) {
+    // Out of Claude usage (the agent or a child said so): start nothing new until the reset time.
+    $paused = nb_usage_paused($pdo);
+    if ($paused && !$wasPaused) {
+        fwrite(STDERR, '[' . nb_now() . '] mining paused until ' . date('Y-m-d H:i T', $paused['until'])
+            . ": out of Claude usage (\"{$paused['message']}\")\n");
+    } elseif (!$paused && $wasPaused) {
+        fwrite(STDERR, '[' . nb_now() . "] Claude usage should be back; mining again\n");
+    }
+    $wasPaused = (bool)$paused;
+    while (!$paused && count($running) < $slots && ($job = nb_mining_next($pdo)) !== null) {
         // Inherits this process's stdout and stderr, so its progress lines show up with the worker's.
         $running[$job['video_id']] = proc_open([PHP_BINARY, __DIR__ . '/mine_video.php', $job['video_id']], [], $pipes);
     }

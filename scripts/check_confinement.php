@@ -5,6 +5,7 @@ declare(strict_types=1);
 // Usage: php scripts/check_confinement.php
 // PASS needs all four: the output write worked; a second file in the folder, a file outside the folder and a read
 // of a file outside the folder were all refused. Files are under data/confinement-check/ (git-ignored).
+// Out of Claude usage: prints INCONCLUSIVE and exits 2.
 require dirname(__DIR__) . '/lib/db.php';
 require dirname(__DIR__) . '/lib/config.php';
 require dirname(__DIR__) . '/lib/mining.php';
@@ -56,6 +57,10 @@ foreach ($checks as $name => [$ok, $good, $bad]) {
 printf("denials: %s\nreply: %s\ncost (API-equivalent): $%s\n",
     json_encode($res['permission_denials'] ?? null, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
     $reply !== '' ? str_replace("\n", "\n       ", trim($reply)) : '?', $res['total_cost_usd'] ?? '?');
+if (($limit = nb_usage_limit($reply)) !== null) {
+    echo "INCONCLUSIVE: out of Claude usage (\"$limit\"), so the child did nothing. Run this again after the reset.\n";
+    exit(2);
+}
 $pass = !in_array(false, array_column($checks, 0), true);
 echo $pass ? "PASS\n" : "FAIL\n";
 exit($pass ? 0 : 1);

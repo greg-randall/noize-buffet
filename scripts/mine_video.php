@@ -2,6 +2,7 @@
 declare(strict_types=1);
 // Mine one video's YouTube comments for leads. Usage: php scripts/mine_video.php <video_id>
 // Steps (the mining table's status): downloading -> filtering -> extracting -> done, or failed.
+// Out of Claude usage: the video goes back to queued and the script exits 75; nothing runs until the reset.
 // Subprocess output goes to comments/<video_id>/mine.log; this prints one progress line per step.
 require dirname(__DIR__) . '/lib/db.php';
 require dirname(__DIR__) . '/lib/config.php';
@@ -34,6 +35,14 @@ $py = fn(string $script, array $args): array => array_merge([getenv('NB_PYTHON_B
 const NB_YTDLP_TIMEOUT_S = 1800.0;
 const NB_FILTER_TIMEOUT_S = 3600.0;
 const NB_SCRIPT_TIMEOUT_S = 300.0;
+/** Out of Claude usage: back in the queue, to be mined again once usage resets (the worker waits until then). */
+$waitForUsage = function (array $paused) use ($pdo, $vid, $say): never {
+    $when = date('Y-m-d H:i T', $paused['until']);
+    nb_mining_update($pdo, $vid, ['status' => 'queued',
+        'error' => "waiting: out of Claude usage until $when (\"{$paused['message']}\"); it will be mined again then"]);
+    $say("out of Claude usage until $when; back in the queue");
+    exit(75);
+};
 $fail = function (string $error) use ($pdo, $vid, $say): never {
     nb_mining_update($pdo, $vid, ['status' => 'failed', 'error' => $error]);
     $say("failed: $error");
@@ -53,6 +62,9 @@ $errorLine = function (int $offset) use ($log): string {
 try {
     nb_mining_enqueue($pdo, $vid); // no-op if queued; lets the script also be run by hand
     touch($log);
+    if ($paused = nb_usage_paused($pdo)) {
+        $waitForUsage($paused);
+    }
 
     // 1. Download the top comments.
     nb_mining_update($pdo, $vid, ['status' => 'downloading', 'error' => null]);
@@ -132,8 +144,12 @@ try {
     // 4. One confined child per chunk lists the names.
     nb_mining_update($pdo, $vid, ['status' => 'extracting']);
     copy(nb_root() . '/mining/child_CLAUDE.md', "$dir/CLAUDE.md");
-    $runChild = function (string $chunk) use ($dir, $config, &$problems): void {
+    $runChild = function (string $chunk) use ($pdo, $dir, $config, &$problems, $waitForUsage): void {
         $c = nb_run_child($chunk, $dir, $config);
+        if (!$c['ok'] && ($limit = nb_usage_limit($c['error'])) !== null) {
+            nb_usage_pause($pdo, $limit);
+            $waitForUsage(nb_usage_paused($pdo) ?? ['until' => time() + 1800, 'message' => $limit]);
+        }
         if (!$c['ok']) {
             $problems[] = "$chunk: {$c['error']}";
         }

@@ -154,4 +154,37 @@ foreach (['NB_PYTHON_BIN', 'NB_FAKE_PY_LOG', 'NB_FAKE_STATUS_LOG', 'NB_FAKE_TS_F
     putenv($k);
 }
 
+echo "out of Claude usage\n";
+putenv("NB_ENV_FILE=$emptyEnv"); // the keyword filter: the TypeSafe fakes are off again
+$childCalls = fn() => count(array_filter($calls(), fn($c) => in_array('--tools', $c['args'], true)));
+$before = $childCalls();
+putenv('NB_FAKE_CHILD_LIMIT=1');
+nb_mining_enqueue($pdo, 'V0000000010');
+[$code, $out] = $mine('V0000000010');
+putenv('NB_FAKE_CHILD_LIMIT');
+$r = $row('V0000000010');
+check($code === 75 && $r['status'] === 'queued', 'a child out of usage puts the video back in the queue (exit 75), not done with no leads');
+check(str_contains((string)$r['error'], 'out of Claude usage') && str_contains($out, 'out of Claude usage'), 'and says why, in the row and the output');
+check($childCalls() === $before + 1, 'the other chunks are not tried once usage is out');
+$paused = nb_usage_paused($pdo);
+check($paused !== null && str_contains($paused['message'], 'weekly limit'), 'usage is marked paused');
+
+$ytBefore = count(array_filter($calls(), fn($c) => in_array('--write-comments', $c['args'], true)));
+[$code, $out] = $mine('V0000000010');
+check($code === 75 && $row('V0000000010')['status'] === 'queued'
+    && count(array_filter($calls(), fn($c) => in_array('--write-comments', $c['args'], true))) === $ytBefore,
+    'while paused, mining a video by hand does nothing (no download) and leaves it queued');
+
+$p = proc_open([PHP_BINARY, __DIR__ . '/../scripts/mine_worker.php', '--once'], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+$out = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
+$code = proc_close($p);
+check($code === 0 && $row('V0000000010')['status'] === 'queued' && str_contains($out, 'paused'), 'the worker starts nothing while paused, and says so');
+
+nb_usage_clear($pdo);
+$p = proc_open([PHP_BINARY, __DIR__ . '/../scripts/mine_worker.php', '--once'], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
+proc_close($p);
+$r = $row('V0000000010');
+check($r['status'] === 'done' && $r['error'] === null, 'once usage is back the worker mines it normally');
+
 finish();

@@ -6,6 +6,7 @@ declare(strict_types=1);
 // events. Markers in the message change the reply:
 //   FAKE_FAIL: error result "boom"   FAKE_DENY: a permission denial   FAKE_COST=<x>: session total becomes x
 //   FAKE_EXIT: exit without a result   FAKE_HANG: go quiet for 5 seconds
+//   FAKE_LIMIT: error result saying the weekly usage limit is reached (resets 2pm New York time)
 $args = array_slice($argv, 1);
 file_put_contents((string)getenv('NB_FAKE_ARGS'), json_encode($args, JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
 $resume = array_search('--resume', $args, true);
@@ -37,6 +38,9 @@ while (($line = fgets(STDIN)) !== false) {
         'session_id' => $sid, 'num_turns' => 2, 'total_cost_usd' => $total, 'permission_denials' => []];
     if (str_contains($text, 'FAKE_FAIL')) {
         $result = ['is_error' => true, 'result' => 'boom'] + $result;
+    }
+    if (str_contains($text, 'FAKE_LIMIT')) {
+        $result = ['is_error' => true, 'result' => "You've hit your weekly limit · resets 2pm (America/New_York)"] + $result;
     }
     if (str_contains($text, 'FAKE_DENY')) {
         $result['permission_denials'] = [['tool_name' => 'Bash', 'tool_input' => ['command' => 'ls /']]];

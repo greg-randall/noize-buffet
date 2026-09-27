@@ -326,7 +326,12 @@ function renderMining(res) {
   const vids = res.videos;
   const active = vids.filter(v => ['downloading', 'filtering', 'extracting'].includes(v.status)).length;
   const queued = vids.filter(v => v.status === 'queued').length;
-  $('#mining-status').toggleClass('d-none', !active && !queued).text(`mining ${active} running, ${queued} queued`);
+  const paused = res.usage_paused;
+  const until = paused && new Date(paused.until * 1000).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+  $('#mining-status').toggleClass('d-none', !active && !queued && !paused)
+    .toggleClass('text-bg-warning', !!paused).toggleClass('text-bg-secondary', !paused)
+    .attr('title', paused ? paused.message : '')
+    .text(paused ? `mining paused until ${until} (out of Claude usage)` : `mining ${active} running, ${queued} queued`);
   $('#mining-summary').text(`${vids.length} songs, ${res.leads.confirmed} confirmed leads, ${res.leads.hints} hints`);
   const $tb = $('#mining-list').empty();
   vids.forEach(v => {

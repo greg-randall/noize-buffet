@@ -192,4 +192,40 @@ check(str_contains(nb_refill_check($r, 5)['why'], 'paused'), 'pause after two fa
 nb_add_batch($r, [$song('R0000000005')], 'asked for in chat', null);
 check(nb_refill_check($r, 5)['refill'] === true, 'a new batch lifts the pause');
 
+echo "out of Claude usage\n";
+$limit = "You've hit your weekly limit · resets 2pm (America/New_York)";
+check(nb_usage_limit($limit) === $limit, 'the weekly-limit message is recognised');
+check(nb_usage_limit("You’ve hit your limit · resets 3:30am (Europe/London)") !== null, 'with a curly apostrophe too');
+check(nb_usage_limit("exit 1, 5-hour limit reached ∙ resets 3pm") !== null, 'the "limit reached" form, inside a longer error');
+check(nb_usage_limit('Claude AI usage limit reached|1790000000') !== null, 'the older "usage limit reached|<time>" form');
+check(nb_usage_limit('boom') === null && nb_usage_limit(null) === null && nb_usage_limit('') === null
+    && nb_usage_limit('no artists.chunk-01.md written') === null, 'other errors are not usage limits');
+check(nb_usage_limit("line one\n$limit\nline three") === $limit, 'only the line that says so is kept');
+
+$at = fn(string $s) => (new DateTimeImmutable($s))->getTimestamp();
+$now = $at('2026-09-27T12:00:00Z'); // 8am in New York (EDT)
+check(nb_usage_reset_at($limit, $now) === $at('2026-09-27T18:01:00Z'), 'resets 2pm New York time: 2pm there today, plus a minute');
+check(nb_usage_reset_at($limit, $at('2026-09-27T19:00:00Z')) === $at('2026-09-28T18:01:00Z'), 'after 2pm there it means tomorrow');
+check(nb_usage_reset_at('resets 3:30am (Europe/London)', $now) === $at('2026-09-28T02:31:00Z'), 'minutes and another time zone');
+check(nb_usage_reset_at('Claude AI usage limit reached|1790000000', 1789990000) === 1790000060, 'a unix time in the message');
+check(nb_usage_reset_at("You've hit your limit", $now) === $now + 1800, 'no reset time in the message: wait 30 minutes');
+check(nb_usage_reset_at('resets 2pm (Not/AZone)', $now) === $now + 1800, 'an unknown time zone: wait 30 minutes');
+check(nb_usage_reset_at('usage limit reached|99999999999', $now) === $now + 8 * 86400, 'never more than 8 days away');
+
+$u = fresh_db('test_usage');
+check(nb_usage_paused($u) === null, 'not paused to begin with');
+$until = nb_usage_pause($u, $limit, $now);
+check($until === $at('2026-09-27T18:01:00Z'), 'pausing returns the reset time');
+$p = nb_usage_paused($u, $now + 60);
+check($p !== null && $p['until'] === $until && $p['message'] === $limit, 'paused, with the time and the message');
+check(nb_usage_paused($u, $until) === null, 'the pause ends at the reset time');
+nb_usage_pause($u, $limit);
+foreach (['U0000000001', 'U0000000002'] as $vid) {
+    nb_add_batch($u, [['video_id' => $vid, 'title' => 'T', 'artist' => 'A', 'bucket' => 'close']], 'b', null);
+}
+$c = nb_refill_check($u, 5);
+check($c['refill'] === false && str_contains($c['why'], 'out of Claude usage'), 'no automatic refill while out of usage');
+nb_usage_clear($u);
+check(nb_usage_paused($u) === null && nb_refill_check($u, 5)['refill'] === true, 'clearing the pause lets refills run again');
+
 finish();

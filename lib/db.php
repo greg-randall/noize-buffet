@@ -472,6 +472,9 @@ function nb_refill_check(PDO $pdo, int $threshold): array
         if ($threshold <= 0) {
             return $no('auto-refill is off (refill_when_left is 0)');
         }
+        if ($paused = nb_usage_paused($pdo)) {
+            return $no('out of Claude usage until ' . gmdate('Y-m-d H:i', $paused['until']) . ' UTC');
+        }
         if ($unplayed > $threshold) {
             return $no("$unplayed songs left");
         }
@@ -673,6 +676,78 @@ function nb_setting_set(PDO $pdo, string $key, ?string $value): void
     nb_write($pdo, fn() => $value === null
         ? $pdo->prepare('DELETE FROM settings WHERE key = ?')->execute([$key])
         : $pdo->prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')->execute([$key, $value]));
+}
+
+// ---------- out of Claude usage ----------
+// When the agent or a mining child says the account's usage limit is reached, everything that would use Claude
+// waits until the reset time the message gives: mining starts no new videos and automatic refills don't run.
+
+/** The line of $text saying Claude usage is used up (e.g. "You've hit your weekly limit · resets 2pm (America/New_York)"), or null. */
+function nb_usage_limit(?string $text): ?string
+{
+    foreach (preg_split('/\R/u', (string)$text) as $line) {
+        if (preg_match("/you[’']ve (hit|reached) your\\b.*\\blimit\\b|\\busage limit reached\\b|\\blimit reached\\s*[·∙•|]/iu", $line)) {
+            return trim($line);
+        }
+    }
+    return null;
+}
+
+/**
+ * When the usage in $message comes back, as a unix time: "resets 2pm (America/New_York)" (the next 2pm there;
+ * no zone means this machine's), "resets 3:30am", or "limit reached|<unix time>", plus a minute's slack.
+ * No time, or a zone PHP doesn't know: 30 minutes from $now. Never more than 8 days away.
+ */
+function nb_usage_reset_at(string $message, int $now): int
+{
+    $cap = $now + 8 * 86400;
+    if (preg_match('/limit reached\s*\|\s*(\d{9,})/i', $message, $m)) {
+        return min((int)$m[1] + 60, $cap);
+    }
+    if (preg_match('/resets\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b\s*(?:\(([^)]+)\))?/i', $message, $m)) {
+        try {
+            $tz = new DateTimeZone(($m[4] ?? '') !== '' ? trim($m[4]) : date_default_timezone_get());
+        } catch (Exception) {
+            return $now + 1800;
+        }
+        $hour = (int)$m[1] % 12 + (strtolower($m[3]) === 'pm' ? 12 : 0);
+        $minute = (int)($m[2] ?? 0);
+        $t = (new DateTimeImmutable("@$now"))->setTimezone($tz)->setTime($hour, $minute);
+        if ($t->getTimestamp() <= $now) {
+            $t = $t->modify('+1 day')->setTime($hour, $minute);
+        }
+        return min($t->getTimestamp() + 60, $cap);
+    }
+    return $now + 1800;
+}
+
+/** Record that Claude usage is used up; returns the unix time it's expected back. */
+function nb_usage_pause(PDO $pdo, string $message, ?int $now = null): int
+{
+    $until = nb_usage_reset_at($message, $now ?? time());
+    nb_write($pdo, function () use ($pdo, $until, $message): void {
+        nb_setting_set($pdo, 'usage_paused_until', (string)$until);
+        nb_setting_set($pdo, 'usage_pause_message', $message);
+    });
+    return $until;
+}
+
+/** ['until' => unix time, 'message' => text] while paused for usage, else null. */
+function nb_usage_paused(PDO $pdo, ?int $now = null): ?array
+{
+    $until = (int)nb_setting($pdo, 'usage_paused_until', '0');
+    if ($until <= ($now ?? time())) {
+        return null;
+    }
+    return ['until' => $until, 'message' => (string)nb_setting($pdo, 'usage_pause_message', '')];
+}
+
+function nb_usage_clear(PDO $pdo): void
+{
+    nb_write($pdo, function () use ($pdo): void {
+        nb_setting_set($pdo, 'usage_paused_until', null);
+        nb_setting_set($pdo, 'usage_pause_message', null);
+    });
 }
 
 function nb_mute_add(PDO $pdo, string $kind, string $value): int
