@@ -1,4 +1,5 @@
-.env
+.env*
+!.env.example
 data/
 comments/
 *.sqlite
@@ -22,3 +23,7 @@ __pycache__/
 desktop.ini
 Thumbs.db
 .DS_Store
+# editor backups (nano, vim), which can hold copies of personal notes
+*~
+*.swp
+*.save
