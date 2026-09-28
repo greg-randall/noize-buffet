@@ -37,8 +37,9 @@
       #chat-log { height: 55vh; }
     }
     #player-wrap { aspect-ratio: 16 / 9; position: relative; }
-    /* The name floats faintly over the video's top-left corner, on top of everything; clicks go through to the video. */
-    #brand { position: absolute; top: 0; left: 0; z-index: 1000000; pointer-events: none; user-select: none;
+    /* The name straddles the video's top-left corner (hanging a little off its edges), on top of everything; clicks
+       go through to the video. */
+    #brand { position: absolute; top: -12px; left: -6px; z-index: 1000000; pointer-events: none; user-select: none;
       font-family: 'Geo', sans-serif; font-size: 4rem; line-height: .75; text-transform: uppercase; letter-spacing: .02em;
       padding: .05em 0 0 .05em; color: #fff; opacity: .8;
       text-shadow:
@@ -84,7 +85,7 @@
       <div class="row g-3 flex-shrink-0">
         <div class="col-md-8">
           <div id="empty-queue" class="alert alert-info d-none">No songs yet. Answer the agent in the chat, or ask it for songs.</div>
-          <div id="player-wrap" class="mb-2"><div id="player"></div><div id="brand" aria-hidden="true">noize-buffet</div></div>
+          <div id="player-wrap" class="mb-2"><div id="player"></div><div id="brand" aria-hidden="true">noize_buffet</div></div>
           <div id="unavailable" class="alert alert-danger d-none"></div>
         </div>
 
