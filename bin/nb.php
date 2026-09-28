@@ -20,6 +20,7 @@ const NB_USAGE = [
     'say <text>' => 'post a short message to the user right now, while you keep working (e.g. before a long batch)',
     'leads' => 'artists named in the YouTube comments of songs they loved, strongest first (confirmed, then hints)',
     'lead <name>' => 'one lead with every comment behind it',
+    'history <brief.md|taste.md|handoff.md> [id]' => "a memory file's saved versions, newest first; with an id, that version's text",
 ];
 
 /** Print the JSON result, append the call to data/nb.log (one JSON object per line), and exit. */
@@ -145,6 +146,20 @@ try {
                 out(['ok' => false, 'error' => 'no lead with that name; see php bin/nb.php leads'], 2);
             }
             out($match[0] + ['youtube' => nb_lead_youtube_all($pdo)[$key] ?? null]);
+
+        case 'history':
+            $name = $argv[2] ?? '';
+            if (!array_key_exists($name, nb_memory_files())) {
+                out(['ok' => false, 'error' => 'history needs brief.md, taste.md or handoff.md'], 2);
+            }
+            if (!isset($argv[3])) {
+                out(nb_file_history($pdo, $name));
+            }
+            $v = ctype_digit($argv[3]) ? nb_file_version($pdo, $name, (int)$argv[3]) : null;
+            if ($v === null) {
+                out(['ok' => false, 'error' => "no saved version $argv[3] of $name; see php bin/nb.php history $name"], 2);
+            }
+            out($v + ['deleted' => $v['content'] === null]);
 
         case 'mutes':
             out(nb_mutes($pdo));

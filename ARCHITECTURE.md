@@ -24,6 +24,7 @@ One SQLite file, `data/music.sqlite` (`NB_DB` overrides it; the tests use this).
 | `batches` | each batch's summary and the job that made it |
 | `listens` | per song: furthest %, rating, notes, off-brief, new-to-me, skipped, finished |
 | `note_history` | notes replaced after they had stood for 10 minutes |
+| `file_history` | every version of `brief.md`, `taste.md` and `handoff.md`: saved by the job worker before each job (edits made by hand, `job_id` null) and after it (the job's own edits); a deleted file is a version with no content. `nb.php history <file> [id]` reads it |
 | `chat` | every message (user, parent, system) |
 | `jobs` | agent jobs (interview, chat, refill): status, payload, result, error, session id |
 | `mutes` | artists and lanes to stop suggesting |

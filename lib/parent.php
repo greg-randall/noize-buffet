@@ -16,7 +16,7 @@ const NB_PARENT_BUILTIN_TOOLS = 'Read,Edit,Write,WebSearch,WebFetch,Bash';
 /** Where the agent leaves a note for its next conversation when this one is about to start over. */
 function nb_handoff_path(): string
 {
-    return getenv('NB_HANDOFF_FILE') ?: nb_root() . '/handoff.md';
+    return nb_memory_files()['handoff.md'];
 }
 
 function nb_parent_prompt(array $job, bool $newSession): string

@@ -18,6 +18,7 @@ You are the **parent agent** of noize-buffet, a personal, endless, ever-changing
   The output lists `added`, `duplicates` and `invalid`. Fix and re-add invalid ones; tell the user about anything you couldn't add.
 - `php bin/nb.php mute artist|lane <value>` / `mutes`: stop suggesting something.
 - `php bin/nb.php status`: counts.
+- `php bin/nb.php history taste.md` (or `brief.md`, `handoff.md`): earlier versions, newest first; add a version's `id` for its text. Use it to recover something the user said that got lost from `taste.md`.
 - `php bin/nb.php note <video_id> "text"`: append the user's comment to that song's notes (never overwrites).
 - `php bin/nb.php set <video_id> rating=yes new_to_me=1 off_brief=0`: set a song's rating (top, yes, good, ok, meh, no) and toggles from what the user said. Give only the fields you're setting; `new_to_me=unknown` clears it.
 - `php bin/nb.php say "text"`: post a message to the user **immediately**, while you keep working. Use it before anything slow.

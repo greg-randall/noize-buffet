@@ -110,4 +110,34 @@ check($last['args'] === ['note', 'ZZZZZZZZZZZ', 'x'] && $last['exit'] === 2, 'la
 $bad = array_values(array_filter($log, fn($e) => ($e['args'][0] ?? '') === 'add-batch' && ($e['input'] ?? '') === 'not json'));
 check(count($bad) > 0, 'add-batch logs the exact input it was given');
 
+echo "memory file history\n";
+$mem = tmp_dir() . '/memory';
+exec('rm -rf ' . escapeshellarg($mem));
+mkdir($mem);
+putenv("NB_MEMORY_DIR=$mem");
+putenv("NB_HANDOFF_FILE=$mem/handoff.md");
+$pdo = nb_db();
+check(nb_file_snapshot($pdo, null) === [], 'no files yet: nothing saved');
+file_put_contents("$mem/taste.md", "## You said\n- loves the drums\n");
+check(nb_file_snapshot($pdo, 3) === ['taste.md'], 'a new taste.md is saved');
+check(nb_file_snapshot($pdo, 4) === [], 'unchanged: not saved again');
+file_put_contents("$mem/taste.md", "## You said\n");
+file_put_contents("$mem/brief.md", "weird club music");
+check(nb_file_snapshot($pdo, 5) === ['brief.md', 'taste.md'], 'each changed file is saved');
+unlink("$mem/taste.md");
+check(nb_file_snapshot($pdo, null) === ['taste.md'], 'a deleted file is recorded');
+[$code, $h] = nb_cli($cli, ['history', 'taste.md']);
+check($code === 0 && count($h) === 3 && $h[0]['deleted'] === true && $h[0]['job_id'] === null
+    && $h[2]['job_id'] === 3 && $h[2]['bytes'] === strlen("## You said\n- loves the drums\n") && !isset($h[0]['content']),
+    'history lists versions newest first, with the job that made each, without their text');
+[$code, $v] = nb_cli($cli, ['history', 'taste.md', (string)$h[2]['id']]);
+check($code === 0 && $v['content'] === "## You said\n- loves the drums\n" && $v['deleted'] === false,
+    "an old version's text can be read back (a line the agent later dropped isn't lost)");
+[$code, $r] = nb_cli($cli, ['history', 'brief.md', (string)$h[2]['id']]);
+check($code === 2 && $r['ok'] === false, "another file's version id is refused");
+[$code, $r] = nb_cli($cli, ['history', '../../etc/passwd']);
+check($code === 2 && $r['ok'] === false, 'only the memory files have a history');
+putenv('NB_MEMORY_DIR');
+putenv('NB_HANDOFF_FILE');
+
 finish();

@@ -47,7 +47,11 @@ while (true) {
     }
     fwrite(STDERR, '[' . nb_now() . "] job {$job['id']} ({$job['kind']}) started\n");
     $t = nb_clock();
+    nb_file_snapshot($pdo, null); // edits made by hand since the last job
     $s = nb_run_parent_job($pdo, $job, $config, $parent, $logToolCalls);
+    if ($changed = nb_file_snapshot($pdo, (int)$job['id'])) {
+        fwrite(STDERR, '    saved a version of ' . implode(', ', $changed) . "\n");
+    }
     $status = nb_locked($pdo, fn() => $pdo->query('SELECT status FROM jobs WHERE id = ' . (int)$job['id'])->fetchColumn());
     fwrite(STDERR, sprintf("[%s] job %d %s in %.1fs, %s turns, $%s (API-equivalent), agent process %s (pid %s)\n", nb_now(),
         $job['id'], $status, nb_clock() - $t, $s['turns'] ?? '?',
