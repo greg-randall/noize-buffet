@@ -39,9 +39,9 @@
     #player-wrap { aspect-ratio: 16 / 9; position: relative; }
     /* The name straddles the video's top-left corner (hanging a little off its edges), on top of everything; clicks
        go through to the video. */
-    #brand { position: absolute; top: -12px; left: -6px; z-index: 1000000; pointer-events: none; user-select: none;
+    #brand { position: absolute; top: -16px; left: -12px; z-index: 1000000; pointer-events: none; user-select: none;
       font-family: 'Geo', sans-serif; font-size: 4rem; line-height: .75; text-transform: uppercase; letter-spacing: .02em;
-      padding: .05em 0 0 .05em; color: #fff; opacity: .9;
+      color: #fff; opacity: .9;
       text-shadow:
         /* tight: a heavy dark edge all round, diagonals included */
         -3px 0 4px #000, 3px 0 4px #000, 0 -3px 4px #000, 0 3px 4px #000,
