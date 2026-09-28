@@ -395,7 +395,9 @@ function renderMining(res) {
       : d.toLocaleDateString([], {month: 'short', day: 'numeric'});
     const filter = v.filter === 'keyword' ? 'keywords (no TypeSafe key)' : (v.filter || '');
     $('<tr>').append(
-      $('<td class="text-nowrap">').text(when), $('<td>').text(v.artist ? `${v.artist} - ${v.title}` : v.video_id),
+      $('<td class="text-nowrap">').text(when), $('<td>').append($('<a target="_blank" rel="noopener noreferrer">')
+        .attr('href', 'https://www.youtube.com/watch?v=' + encodeURIComponent(v.video_id))
+        .text(v.artist ? `${v.artist} - ${v.title}` : v.video_id)),
       $('<td>').text(v.status),
       $('<td>').text(filter), $('<td>').text(v.comments ?? ''), $('<td>').text(v.flagged ?? ''),
       $('<td>').text(v.covered ?? ''), $('<td>').text(v.mentions ?? ''),
