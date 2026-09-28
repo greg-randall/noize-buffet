@@ -40,7 +40,7 @@
     /* The name straddles the video's top-left corner (hanging a little off its edges), on top of everything; clicks
        go through to the video. */
     #brand { position: absolute; top: -16px; left: -12px; z-index: 1000000; pointer-events: none; user-select: none;
-      font-family: 'Geo', sans-serif; font-size: 4rem; line-height: .75; text-transform: uppercase; letter-spacing: .02em;
+      font-family: 'Geo', sans-serif; font-size: 4rem; line-height: .75; text-transform: uppercase; letter-spacing: -.09em;
       color: #fff; opacity: .9;
       text-shadow:
         /* tight: a heavy dark edge all round, diagonals included */
