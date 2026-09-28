@@ -222,6 +222,36 @@ def old_processes():
     return found
 
 
+def stop_processes(procs, grace_s=5.0):
+    """SIGTERM each (pid, cmd), then SIGKILL whatever is still there after grace_s seconds."""
+    for pid, _ in procs:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    deadline = time.time() + grace_s
+    while procs and time.time() < deadline and any(Path(f"/proc/{pid}").exists() for pid, _ in procs):
+        time.sleep(0.2)
+    for pid, _ in procs:
+        if Path(f"/proc/{pid}").exists():
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+def stop_leftovers(when):
+    """Stop this folder's processes that outlived their parent: mining children run under `timeout`, which puts
+    them in a process group of their own, so stopping the workers' groups doesn't reach them. A leftover child keeps
+    its song folder's lock and makes the next mining of that song refuse to run."""
+    left = old_processes()
+    if left:
+        print(f"{when}: stopping {len(left)} leftover process(es) from this folder:", flush=True)
+        for pid, cmd in left:
+            print(f"    pid {pid}: {cmd}", flush=True)
+        stop_processes(left)
+
+
 def reset():
     """Stop this folder's old processes and delete everything a run created, after a loud confirmation."""
     procs = old_processes()
@@ -249,20 +279,7 @@ def reset():
     if answer.strip() != "RESET":
         sys.exit("\n  Cancelled. Nothing was changed.")
 
-    for pid, _ in procs or []:
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-    deadline = time.time() + 5
-    while procs and time.time() < deadline and any(Path(f"/proc/{pid}").exists() for pid, _ in procs):
-        time.sleep(0.2)
-    for pid, _ in procs or []:
-        if Path(f"/proc/{pid}").exists():
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+    stop_processes(procs or [])
     if procs:
         print(f"  stopped {len(procs)} old process(es)")
     for path in doomed:
@@ -293,6 +310,8 @@ def main():
         sys.exit(1)
     check_env(args.no_typesafe)
     (ROOT / "data").mkdir(exist_ok=True)
+    if not args.reset:  # --reset has already stopped them
+        stop_leftovers("Before starting")
     port = choose_port()
 
     env = dict(os.environ, PHP_CLI_SERVER_WORKERS="4")
@@ -315,6 +334,7 @@ def main():
                 pass
         for proc in procs.values():
             proc.wait()
+        stop_leftovers("Almost stopped")
         sys.exit(0)
 
     signal.signal(signal.SIGINT, stop)

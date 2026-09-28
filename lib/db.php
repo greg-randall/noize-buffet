@@ -536,6 +536,16 @@ function nb_mining_enqueue(PDO $pdo, string $videoId): bool
     });
 }
 
+/** Put a video back in the mining queue, whatever its status (to mine it again); false if it was never queued. */
+function nb_mining_requeue(PDO $pdo, string $videoId): bool
+{
+    return nb_write($pdo, function () use ($pdo, $videoId): bool {
+        $st = $pdo->prepare("UPDATE mining SET status = 'queued', error = NULL, updated_at = ? WHERE video_id = ?");
+        $st->execute([nb_now(), $videoId]);
+        return $st->rowCount() === 1;
+    });
+}
+
 /** Queue songs rated top/yes or named by the user that aren't queued yet (e.g. rated before mining existed). */
 function nb_mining_backfill(PDO $pdo): int
 {

@@ -86,5 +86,22 @@ print("--no-typesafe")
 ok, out = check_with(everything, "apt", need_typesafe=False, modules_missing=True)
 check(ok and "TypeSafe" not in out, "TypeSafe's packages aren't checked when running without it")
 
+print("stopping leftover processes")
+IGNORE_TERM = "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)"
+stubborn = subprocess.Popen([sys.executable, "-c", IGNORE_TERM])
+polite = subprocess.Popen(["sleep", "30"])
+start.time.sleep(0.3)  # let the stubborn one install its handler
+start.stop_processes([(polite.pid, "sleep"), (stubborn.pid, "stubborn")], grace_s=1.0)
+check(polite.wait(timeout=5) == -15, "a process that stops on SIGTERM gets SIGTERM")
+check(stubborn.wait(timeout=5) == -9, "one that ignores it is killed after the grace period")
+with mock.patch.object(start, "old_processes", return_value=[]), mock.patch.object(start, "stop_processes") as sp:
+    start.stop_leftovers("Before starting")
+check(not sp.called, "nothing left over: nothing stopped")
+out = io.StringIO()
+with mock.patch.object(start, "old_processes", return_value=[(123, "claude -p ...")]), \
+        mock.patch.object(start, "stop_processes") as sp, contextlib.redirect_stdout(out):
+    start.stop_leftovers("Before starting")
+check(sp.called and "pid 123: claude -p" in out.getvalue(), "leftovers are listed and stopped")
+
 print("ALL PASSED" if fails == 0 else f"FAILED {fails}")
 sys.exit(1 if fails else 0)

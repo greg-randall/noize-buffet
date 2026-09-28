@@ -224,6 +224,23 @@ $names = array_column(nb_leads($pdo), 'name_key');
 check($code === 0 && !in_array('ghostband', $names, true), "a folder that didn't finish mining is never merged into the leads");
 check(in_array('burial', $names, true), 'the finished videos still are');
 
+echo "a song folder another child still holds (a leftover from an interrupted run)\n";
+@mkdir("$comments/V0000000014", 0777, true);
+$held = nb_child_folder_lock("$comments/V0000000014");
+nb_mining_enqueue($pdo, 'V0000000014');
+[$code, $out] = $mine('V0000000014');
+$r = $row('V0000000014');
+check($code === 1 && $r['status'] === 'failed' && str_contains((string)$r['error'], 'no names extracted from any chunk')
+    && str_contains((string)$r['error'], 'another child is running in this folder'),
+    'every chunk refused: the video fails (to be mined again), not "done" with no leads' . " (got {$r['status']}: {$r['error']})");
+flock($held, LOCK_UN);
+fclose($held);
+check(nb_mining_requeue($pdo, 'V0000000014') && $row('V0000000014')['status'] === 'queued' && $row('V0000000014')['error'] === null,
+    'nb_mining_requeue puts it back in the queue');
+[$code] = $mine('V0000000014');
+check($code === 0 && $row('V0000000014')['status'] === 'done', 'once the folder is free it mines normally');
+check(!nb_mining_requeue($pdo, 'VNEVERMINED'), "a video that was never queued can't be requeued");
+
 echo "prework: YouTube links for leads\n";
 $searches = fn() => array_values(array_filter($calls(), fn($c) => str_starts_with((string)end($c['args']), 'ytsearch')));
 $yt = nb_lead_youtube_all($pdo);

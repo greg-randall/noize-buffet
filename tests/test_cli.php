@@ -110,6 +110,15 @@ check($last['args'] === ['note', 'ZZZZZZZZZZZ', 'x'] && $last['exit'] === 2, 'la
 $bad = array_values(array_filter($log, fn($e) => ($e['args'][0] ?? '') === 'add-batch' && ($e['input'] ?? '') === 'not json'));
 check(count($bad) > 0, 'add-batch logs the exact input it was given');
 
+echo "remine\n";
+nb_mining_enqueue(nb_db(), 'AAAAAAAAAAA');
+nb_mining_update(nb_db(), 'AAAAAAAAAAA', ['status' => 'done']);
+[$code, $r] = nb_cli($cli, ['remine', 'AAAAAAAAAAA']);
+$m = array_values(array_filter(nb_mining_list(nb_db()), fn($x) => $x['video_id'] === 'AAAAAAAAAAA'))[0];
+check($code === 0 && $r['queued'] === 'AAAAAAAAAAA' && $m['status'] === 'queued', 'remine puts a mined song back in the queue');
+[$code, $r] = nb_cli($cli, ['remine', 'ZZZZZZZZZZZ']);
+check($code === 2 && $r['ok'] === false, 'remine of a song never mined is refused');
+
 echo "memory file history\n";
 $mem = tmp_dir() . '/memory';
 exec('rm -rf ' . escapeshellarg($mem));

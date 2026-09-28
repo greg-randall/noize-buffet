@@ -20,6 +20,7 @@ const NB_USAGE = [
     'say <text>' => 'post a short message to the user right now, while you keep working (e.g. before a long batch)',
     'leads' => 'artists named in the YouTube comments of songs they loved, strongest first (confirmed, then hints)',
     'lead <name>' => 'one lead with every comment behind it',
+    'remine <video_id>' => "mine a song's YouTube comments again (e.g. after a mining problem)",
     'history <brief.md|taste.md|handoff.md> [id]' => "a memory file's saved versions, newest first; with an id, that version's text",
 ];
 
@@ -146,6 +147,13 @@ try {
                 out(['ok' => false, 'error' => 'no lead with that name; see php bin/nb.php leads'], 2);
             }
             out($match[0] + ['youtube' => nb_lead_youtube_all($pdo)[$key] ?? null]);
+
+        case 'remine':
+            $vid = (string)($argv[2] ?? '');
+            if (!nb_mining_requeue($pdo, $vid)) {
+                out(['ok' => false, 'error' => "$vid was never mined; songs are mined when rated top or yes"], 2);
+            }
+            out(['ok' => true, 'queued' => $vid]);
 
         case 'history':
             $name = $argv[2] ?? '';

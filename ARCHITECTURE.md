@@ -72,7 +72,7 @@ When the agent's error or a Haiku child's reply is a usage-limit message ("You'v
 
 ## Comment mining
 
-Rating a song top or yes (`nb_save_listen()`), or adding it with bucket `user`, queues it in `mining`. On start, the worker also queues older top/yes songs (`nb_mining_backfill()`), puts videos interrupted mid-mining back in the queue, and retries videos that failed more than a day ago. It runs `scripts/mine_video.php <video_id>` for each, `mining_workers` at once, and marks a video `failed` if its pipeline dies without recording an outcome.
+Rating a song top or yes (`nb_save_listen()`), or adding it with bucket `user`, queues it in `mining`. On start, the worker also queues older top/yes songs (`nb_mining_backfill()`), puts videos interrupted mid-mining back in the queue, and retries videos that failed more than a day ago. It runs `scripts/mine_video.php <video_id>` for each, `mining_workers` at once, and marks a video `failed` if its pipeline dies without recording an outcome. A video whose extraction produced nothing at all also fails, rather than ending `done` with no leads.
 
 `mine_video.php`, in `comments/<video_id>/` (`NB_COMMENTS_DIR` overrides the folder), with subprocess output appended to `mine.log`:
 
@@ -185,3 +185,4 @@ Runs every `tests/test_*.php` and `tests/test_*.py`. They use stand-ins, so they
 - **Mining:** the `[mine]` lines show each video's steps. For one video, `comments/<video_id>/mine.log` has everything yt-dlp, the filter and the children printed; `children.jsonl` each child's result; `coverage.json` which comments got no line. The panel's Problems column shows the row's error, and Notes what the filter skipped.
 - **Every Haiku child fails at start-up** and `mine.log` mentions MCP or a managed policy: a managed `managed-mcp.json` makes `--strict-mcp-config` exit at once. Remove that flag from `nb_child_command()`.
 - **Mining never starts:** check the status badges over the chat's top-right corner for "mining paused … (out of Claude usage)".
+- **"refusing to run: another child is running in this folder":** a Haiku child from an earlier, interrupted mining of that song is still running and holds the folder's lock (children run under `timeout`, in a process group of their own, so stopping the workers doesn't reach them). `start.py` now stops this folder's leftover processes when it starts and when it stops. A video where no chunk produced anything fails instead of ending `done`, so it's mined again; `php bin/nb.php remine <video_id>` queues one again by hand.

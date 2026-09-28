@@ -223,6 +223,11 @@ try {
     if ($cov['missed']) {
         $problems[] = count($cov['missed']) . " of {$cov['flagged']} flagged comments still not covered after one re-run (see coverage.json)";
     }
+    // Nothing extracted at all: fail rather than end "done" with no leads, so the video is mined again (on the
+    // worker's next start, or a day later).
+    if ($cov['flagged'] > 0 && $cov['covered'] === 0) {
+        $fail('no names extracted from any chunk: ' . implode('; ', $problems));
+    }
     if ($cov['unknown']) {
         $problems[] = 'the child listed comment ids that do not exist: ' . implode(', ', $cov['unknown']);
     }
