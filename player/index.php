@@ -61,6 +61,10 @@
     #debug-log .err { color: var(--bs-danger-text-emphasis); }
     #debug-log:not(.verbose) .detail { display: none; }
     #mining-status { cursor: pointer; }
+    .panel-label { font-size: .7rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
+      color: var(--bs-secondary-color); margin-bottom: .25rem; }
+    #song-bucket { font-size: .65rem; letter-spacing: .06em; }
+    #song-source a { color: inherit; }
   </style>
 </head>
 <body>
@@ -75,13 +79,14 @@
         </div>
 
         <div class="col-md-4" id="song-col"><div id="song-panel"><div id="song-info">
-          <h2 class="h6 mb-0" id="song-title"></h2>
-          <div class="small text-secondary" id="song-artist"></div>
-          <div class="small text-secondary" id="position"></div>
-          <div class="small text-secondary mb-2" id="song-meta"></div>
-          <p class="small" id="song-reason"></p>
+          <div class="d-flex align-items-center gap-2 mb-1">
+            <span id="song-bucket" class="badge rounded-pill text-bg-secondary text-uppercase d-none"></span>
+            <span id="position" class="small text-body-secondary ms-auto"></span>
+          </div>
+          <h2 class="fs-5 fw-semibold mb-0 lh-sm" id="song-title"></h2>
+          <div class="text-body-secondary mb-3" id="song-artist"></div>
 
-          <div id="rating-group" class="btn-group btn-group-sm mb-2 flex-wrap" role="group" aria-label="Rating">
+          <div id="rating-group" class="btn-group btn-group-sm w-100 mb-2" role="group" aria-label="Rating">
             <button class="btn btn-outline-success" data-rating="top">top</button>
             <button class="btn btn-outline-success" data-rating="yes">yes</button>
             <button class="btn btn-outline-info" data-rating="good">good</button>
@@ -89,16 +94,19 @@
             <button class="btn btn-outline-warning" data-rating="meh">meh</button>
             <button class="btn btn-outline-danger" data-rating="no">no</button>
           </div>
-
           <!-- Set by the agent from the chat ("never heard this", "not what I'm after"); shown, not clickable. -->
           <div id="song-tags" class="mb-2 d-flex gap-1 flex-wrap"></div>
 
-          <div class="small text-body-secondary mb-1" title="The agent records them from what you say in the chat">Your notes</div>
+          <div class="panel-label mt-3">Why it's here</div>
+          <p class="small mb-1" id="song-reason"></p>
+          <div class="small text-body-secondary text-truncate" id="song-source"></div>
+
+          <div class="panel-label mt-3" title="The agent records them from what you say in the chat">Your notes</div>
           <div id="song-notes" class="chat-text small text-body-secondary">none yet</div>
           </div>
-          <div class="d-flex gap-2 pt-2 flex-shrink-0">
-            <button id="btn-back" class="btn btn-sm btn-outline-light">⏮ Back</button>
-            <button id="btn-next" class="btn btn-sm btn-outline-light">Next ⏭</button>
+          <div class="d-flex gap-2 pt-3 flex-shrink-0">
+            <button id="btn-back" class="btn btn-outline-light flex-fill py-2">Back</button>
+            <button id="btn-next" class="btn btn-light flex-fill py-2 fw-semibold">Next</button>
           </div>
         </div></div>
       </div>

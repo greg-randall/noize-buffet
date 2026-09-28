@@ -183,8 +183,9 @@ function loadSong(idx, autoplay, byUser) {
   debug('song details', {autoplay, byUser, furthest: state.furthest});
   $('#song-title').text(s.title);
   $('#song-artist').text(s.artist);
-  $('#song-meta').text([s.bucket, s.source].filter(Boolean).join(' · '));
+  $('#song-bucket').text(s.bucket || '').toggleClass('d-none', !s.bucket);
   $('#song-reason').text(s.reason || '');
+  renderSource(s.source);
   renderSongNotes();
   $('#chat-input').attr('placeholder', `What do you think of "${s.title}"? Or ask for anything…`);
   renderSongControls();
@@ -193,6 +194,18 @@ function loadSong(idx, autoplay, byUser) {
   markCurrent(true);
   showProgress();
   cueOrLoad(s.video_id, autoplay);
+}
+
+// Where the pick came from: a link showing just the site ("earmilk.com"), or the text as is ("memory",
+// "YouTube comments: ...").
+function renderSource(source) {
+  const $el = $('#song-source').empty();
+  if (!source) return;
+  let url = null;
+  try { url = /^https?:\/\//.test(source) ? new URL(source) : null; } catch (e) { /* not a URL */ }
+  $el.append('from ', url
+    ? $('<a target="_blank" rel="noopener noreferrer">').attr('href', url.href).attr('title', url.href).text(url.hostname.replace(/^www\./, ''))
+    : $('<span>').text(source));
 }
 
 function renderSongNotes() {
