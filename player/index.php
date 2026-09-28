@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>noize-buffet</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geo:ital@0;1&display=swap">
   <style>
     /* App layout on wide screens: the page never scrolls; the playlist, mining table,
        debug log and chat each scroll inside their own box. Narrow screens stack everything and scroll normally. */
@@ -35,8 +38,9 @@
     }
     #player-wrap { aspect-ratio: 16 / 9; position: relative; }
     /* The name floats faintly over the video's top-left corner, on top of everything; clicks go through to the video. */
-    #brand { position: absolute; top: .2rem; left: .8rem; z-index: 1000000; pointer-events: none; user-select: none;
-      font-size: 4rem; line-height: 1.1; font-weight: 800; letter-spacing: .01em; color: #fff; opacity: .8;
+    #brand { position: absolute; top: 0; left: 0; z-index: 1000000; pointer-events: none; user-select: none;
+      font-family: 'Geo', sans-serif; font-size: 4rem; line-height: .75; text-transform: uppercase; letter-spacing: .02em;
+      padding: .05em 0 0 .05em; color: #fff; opacity: .8;
       text-shadow:
         /* tight: a crisp dark edge all round */
         -2px 0 2px #000, 2px 0 2px #000, 0 -2px 2px #000, 0 2px 2px #000,
