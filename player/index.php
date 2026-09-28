@@ -34,9 +34,9 @@
       #chat-log { height: 55vh; }
     }
     #player-wrap { aspect-ratio: 16 / 9; position: relative; }
-    /* The name floats faintly over the video's top-right corner; clicks go through to the video. */
-    #brand { position: absolute; top: .4rem; right: .7rem; pointer-events: none; font-weight: 600; letter-spacing: .02em;
-      color: #fff; opacity: .35; text-shadow: 0 1px 3px rgba(0, 0, 0, .8); }
+    /* The name floats faintly over the video's top-left corner, on top of everything; clicks go through to the video. */
+    #brand { position: absolute; top: .4rem; left: .7rem; z-index: 1000000; pointer-events: none; user-select: none;
+      font-weight: 600; letter-spacing: .02em; color: #fff; opacity: .4; text-shadow: 0 1px 3px rgba(0, 0, 0, .8); }
     #status-overlay { position: absolute; top: .45rem; right: 1.4rem; left: .6rem; z-index: 2; display: flex; gap: .3rem;
       flex-wrap: wrap; justify-content: flex-end; opacity: .45; transition: opacity .15s; pointer-events: none; }
     #status-overlay > * { pointer-events: auto; white-space: nowrap; }
