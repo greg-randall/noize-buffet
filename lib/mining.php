@@ -132,6 +132,18 @@ function nb_find_bin(string $name): ?string
     return null;
 }
 
+/** The python3 to run scripts with; NB_PYTHON_BIN lets tests stand in a fake (tests/fake_python.py). */
+function nb_python_bin(): string
+{
+    return getenv('NB_PYTHON_BIN') ?: (nb_find_bin('python3') ?? 'python3');
+}
+
+/** The yt-dlp to run; NB_YTDLP_BIN lets tests stand in a fake (tests/fake_ytdlp.php). */
+function nb_ytdlp_bin(): string
+{
+    return getenv('NB_YTDLP_BIN') ?: (nb_find_bin('yt-dlp') ?? 'yt-dlp');
+}
+
 /**
  * Run a command (no shell) in $cwd, appending its stdout and stderr to $logFile, with an optional time limit.
  * With a time limit, uses GNU `timeout` command to enforce it and a kill-after grace period; a command that still
@@ -570,7 +582,7 @@ function nb_coverage(string $dir, bool $writeExtra, string $logFile, float $time
     if ($timeoutS <= 0) {
         throw new InvalidArgumentException("timeoutS must be positive, got $timeoutS");
     }
-    $python = getenv('NB_PYTHON_BIN') ?: (nb_find_bin('python3') ?? 'python3');
+    $python = nb_python_bin();
     $cmd = array_merge([$python, nb_root() . '/mining/coverage.py', $dir], $writeExtra ? ['--write-extra'] : []);
     $r = nb_run_logged($cmd, nb_root(), $logFile, $timeoutS);
     $cov = json_decode(trim($r['out']), true);
@@ -619,7 +631,7 @@ function nb_lookup_leads(PDO $pdo, array $config, string $logFile): array
     if (!$todo) {
         return $done;
     }
-    $python = getenv('NB_PYTHON_BIN') ?: (nb_find_bin('python3') ?? 'python3');
+    $python = nb_python_bin();
     $queries = array_values(array_unique(array_column($todo, 1)));
     $r = nb_run_logged(array_merge([$python, nb_root() . '/scripts/yt_search.py'], $queries, ['-n', '5']),
         nb_root(), $logFile, 900.0);

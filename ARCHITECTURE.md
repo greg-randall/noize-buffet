@@ -167,7 +167,7 @@ Around each run, the runner:
 | `scripts/spotify_playlist.py` | reads public Spotify playlists for the agent |
 | `scripts/check_confinement.php` | the real confinement check |
 | `mining/` | filters, `prepare.py`, `coverage.py`, `merge_leads.py`, `mentions.py` (shared parsing), `child_CLAUDE.md`, `typesafe_experiment.py` |
-| `player/` | the page, `api.php`, `app.js` |
+| `player/` | the page (`index.php`), its styles (`app.css`) and script (`app.js`), and the API (`api.php`) |
 | `data/` | database, `jobs/<id>.json`, `nb.log`, `parent-stderr.log`, `api-errors.log` (never committed) |
 | `comments/<video_id>/` | one mined video's files, described above (never committed) |
 | `tests/` | the tests, their stand-ins and fixtures |

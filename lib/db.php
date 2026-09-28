@@ -22,65 +22,6 @@ function nb_db_path(): string
     return getenv('NB_DB') ?: nb_root() . '/data/music.sqlite';
 }
 
-/**
- * The agent's memory files, by name: where each lives. NB_MEMORY_DIR (tests) moves brief.md and taste.md;
- * NB_HANDOFF_FILE moves handoff.md.
- */
-function nb_memory_files(): array
-{
-    $dir = getenv('NB_MEMORY_DIR') ?: nb_root();
-    return ['brief.md' => "$dir/brief.md", 'taste.md' => "$dir/taste.md",
-        'handoff.md' => getenv('NB_HANDOFF_FILE') ?: "$dir/handoff.md"];
-}
-
-/**
- * Save a version of each memory file that changed since its last saved version (a deleted file is saved as a NULL
- * version). $jobId: the agent job that changed it, or null for changes made between jobs (by hand).
- * Returns the names saved.
- */
-function nb_file_snapshot(PDO $pdo, ?int $jobId): array
-{
-    $saved = [];
-    foreach (nb_memory_files() as $name => $path) {
-        $content = is_file($path) ? file_get_contents($path) : null;
-        $sha = $content === false || $content === null ? null : sha1($content);
-        nb_write($pdo, function () use ($pdo, $name, $content, $sha, $jobId, &$saved): void {
-            $last = $pdo->prepare('SELECT sha1 FROM file_history WHERE name = ? ORDER BY id DESC LIMIT 1');
-            $last->execute([$name]);
-            $prev = $last->fetch();
-            if ($prev === false ? $sha === null : $prev['sha1'] === $sha) {
-                return; // unchanged (or never existed)
-            }
-            $pdo->prepare('INSERT INTO file_history (name, content, sha1, job_id, saved_at) VALUES (?, ?, ?, ?, ?)')
-                ->execute([$name, $sha === null ? null : $content, $sha, $jobId, nb_now()]);
-            $saved[] = $name;
-        });
-    }
-    return $saved;
-}
-
-/** A memory file's saved versions, newest first, without their content: id, job_id, saved_at, bytes, deleted. */
-function nb_file_history(PDO $pdo, string $name): array
-{
-    return nb_locked($pdo, function () use ($pdo, $name): array {
-        $st = $pdo->prepare('SELECT id, job_id, saved_at, length(CAST(content AS BLOB)) AS bytes, content IS NULL AS deleted
-            FROM file_history WHERE name = ? ORDER BY id DESC');
-        $st->execute([$name]);
-        return array_map(fn($r) => ['id' => (int)$r['id'], 'job_id' => $r['job_id'] === null ? null : (int)$r['job_id'],
-            'saved_at' => $r['saved_at'], 'bytes' => (int)$r['bytes'], 'deleted' => (bool)$r['deleted']], $st->fetchAll());
-    });
-}
-
-/** One saved version (with its content), or null. */
-function nb_file_version(PDO $pdo, string $name, int $id): ?array
-{
-    return nb_locked($pdo, function () use ($pdo, $name, $id): ?array {
-        $st = $pdo->prepare('SELECT id, name, content, job_id, saved_at FROM file_history WHERE name = ? AND id = ?');
-        $st->execute([$name, $id]);
-        return $st->fetch() ?: null;
-    });
-}
-
 function nb_now(): string
 {
     return gmdate('Y-m-d\TH:i:s\Z');
@@ -791,6 +732,22 @@ function nb_setting_set(PDO $pdo, string $key, ?string $value): void
         : $pdo->prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')->execute([$key, $value]));
 }
 
+function nb_mute_add(PDO $pdo, string $kind, string $value): int
+{
+    if (!in_array($kind, NB_MUTE_KINDS, true) || trim($value) === '') {
+        throw new InvalidArgumentException('mute needs kind ' . implode('/', NB_MUTE_KINDS) . ' and a value');
+    }
+    return nb_write($pdo, function () use ($pdo, $kind, $value): int {
+        $pdo->prepare('INSERT INTO mutes (kind, value, created_at) VALUES (?, ?, ?)')->execute([$kind, trim($value), nb_now()]);
+        return (int)$pdo->lastInsertId();
+    });
+}
+
+function nb_mutes(PDO $pdo): array
+{
+    return nb_locked($pdo, fn() => $pdo->query('SELECT * FROM mutes ORDER BY id')->fetchAll());
+}
+
 // ---------- out of Claude usage ----------
 // When the agent or a mining child says the account's usage limit is reached, everything that would use Claude
 // waits until the reset time the message gives: mining starts no new videos and automatic refills don't run.
@@ -863,18 +820,63 @@ function nb_usage_clear(PDO $pdo): void
     });
 }
 
-function nb_mute_add(PDO $pdo, string $kind, string $value): int
+// ---------- memory files (brief.md, taste.md, handoff.md) ----------
+
+/**
+ * The agent's memory files, by name: where each lives. NB_MEMORY_DIR (tests) moves brief.md and taste.md;
+ * NB_HANDOFF_FILE moves handoff.md.
+ */
+function nb_memory_files(): array
 {
-    if (!in_array($kind, NB_MUTE_KINDS, true) || trim($value) === '') {
-        throw new InvalidArgumentException('mute needs kind ' . implode('/', NB_MUTE_KINDS) . ' and a value');
+    $dir = getenv('NB_MEMORY_DIR') ?: nb_root();
+    return ['brief.md' => "$dir/brief.md", 'taste.md' => "$dir/taste.md",
+        'handoff.md' => getenv('NB_HANDOFF_FILE') ?: "$dir/handoff.md"];
+}
+
+/**
+ * Save a version of each memory file that changed since its last saved version (a deleted file is saved as a NULL
+ * version). $jobId: the agent job that changed it, or null for changes made between jobs (by hand).
+ * Returns the names saved.
+ */
+function nb_file_snapshot(PDO $pdo, ?int $jobId): array
+{
+    $saved = [];
+    foreach (nb_memory_files() as $name => $path) {
+        $content = is_file($path) ? file_get_contents($path) : null;
+        $sha = $content === false || $content === null ? null : sha1($content);
+        nb_write($pdo, function () use ($pdo, $name, $content, $sha, $jobId, &$saved): void {
+            $last = $pdo->prepare('SELECT sha1 FROM file_history WHERE name = ? ORDER BY id DESC LIMIT 1');
+            $last->execute([$name]);
+            $prev = $last->fetch();
+            if ($prev === false ? $sha === null : $prev['sha1'] === $sha) {
+                return; // unchanged (or never existed)
+            }
+            $pdo->prepare('INSERT INTO file_history (name, content, sha1, job_id, saved_at) VALUES (?, ?, ?, ?, ?)')
+                ->execute([$name, $sha === null ? null : $content, $sha, $jobId, nb_now()]);
+            $saved[] = $name;
+        });
     }
-    return nb_write($pdo, function () use ($pdo, $kind, $value): int {
-        $pdo->prepare('INSERT INTO mutes (kind, value, created_at) VALUES (?, ?, ?)')->execute([$kind, trim($value), nb_now()]);
-        return (int)$pdo->lastInsertId();
+    return $saved;
+}
+
+/** A memory file's saved versions, newest first, without their content: id, job_id, saved_at, bytes, deleted. */
+function nb_file_history(PDO $pdo, string $name): array
+{
+    return nb_locked($pdo, function () use ($pdo, $name): array {
+        $st = $pdo->prepare('SELECT id, job_id, saved_at, length(CAST(content AS BLOB)) AS bytes, content IS NULL AS deleted
+            FROM file_history WHERE name = ? ORDER BY id DESC');
+        $st->execute([$name]);
+        return array_map(fn($r) => ['id' => (int)$r['id'], 'job_id' => $r['job_id'] === null ? null : (int)$r['job_id'],
+            'saved_at' => $r['saved_at'], 'bytes' => (int)$r['bytes'], 'deleted' => (bool)$r['deleted']], $st->fetchAll());
     });
 }
 
-function nb_mutes(PDO $pdo): array
+/** One saved version (with its content), or null. */
+function nb_file_version(PDO $pdo, string $name, int $id): ?array
 {
-    return nb_locked($pdo, fn() => $pdo->query('SELECT * FROM mutes ORDER BY id')->fetchAll());
+    return nb_locked($pdo, function () use ($pdo, $name, $id): ?array {
+        $st = $pdo->prepare('SELECT id, name, content, job_id, saved_at FROM file_history WHERE name = ? AND id = ?');
+        $st->execute([$name, $id]);
+        return $st->fetch() ?: null;
+    });
 }
