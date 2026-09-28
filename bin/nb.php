@@ -20,7 +20,7 @@ const NB_USAGE = [
     'say <text>' => 'post a short message to the user right now, while you keep working (e.g. before a long batch)',
     'leads' => 'artists named in the YouTube comments of songs they loved, strongest first (confirmed, then hints)',
     'lead <name>' => 'one lead with every comment behind it',
-    'remine <video_id>' => "mine a song's YouTube comments again (e.g. after a mining problem)",
+    'remine <video_id|part of the artist or title>' => "mine a song's YouTube comments again (e.g. after a mining problem)",
     'history <brief.md|taste.md|handoff.md> [id]' => "a memory file's saved versions, newest first; with an id, that version's text",
 ];
 
@@ -149,11 +149,24 @@ try {
             out($match[0] + ['youtube' => nb_lead_youtube_all($pdo)[$key] ?? null]);
 
         case 'remine':
-            $vid = (string)($argv[2] ?? '');
-            if (!nb_mining_requeue($pdo, $vid)) {
-                out(['ok' => false, 'error' => "$vid was never mined; songs are mined when rated top or yes"], 2);
+            $what = trim(implode(' ', array_slice($argv, 2)));
+            $songs = array_column(nb_queue($pdo), null, 'video_id');
+            if (isset($songs[$what]) || in_array($what, array_column(nb_mining_list($pdo), 'video_id'), true)) {
+                $vid = $what;
+            } else { // part of an artist or title, e.g. "ice age"
+                $hits = array_values(array_filter($songs, fn($s) => $what !== ''
+                    && mb_stripos("{$s['artist']} - {$s['title']}", $what) !== false));
+                if (count($hits) !== 1) {
+                    out(['ok' => false, 'error' => $hits ? 'more than one song matches; give its video_id'
+                        : "no song in the queue has the video_id or name \"$what\"",
+                        'matches' => array_map(fn($s) => "{$s['video_id']}  {$s['artist']} - {$s['title']}", $hits)], 2);
+                }
+                $vid = $hits[0]['video_id'];
             }
-            out(['ok' => true, 'queued' => $vid]);
+            // Already mined: back in the queue. Never mined (e.g. not rated top or yes): queued now.
+            nb_mining_requeue($pdo, $vid) || nb_mining_enqueue($pdo, $vid);
+            $s = $songs[$vid] ?? null;
+            out(['ok' => true, 'queued' => $vid, 'song' => $s ? "{$s['artist']} - {$s['title']}" : null]);
 
         case 'history':
             $name = $argv[2] ?? '';
