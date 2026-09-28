@@ -6,7 +6,7 @@
   <title>noize-buffet</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
   <style>
-    /* App layout on wide screens: the page never scrolls (the top bar stays put); the playlist, mining table,
+    /* App layout on wide screens: the page never scrolls; the playlist, mining table,
        debug log and chat each scroll inside their own box. Narrow screens stack everything and scroll normally. */
     @media (min-width: 992px) {
       html, body { height: 100%; }
@@ -17,13 +17,32 @@
       #tabs-box { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
       #tabs-box .tab-content { flex: 1 1 auto; min-height: 0; }
       #tabs-box .tab-pane { height: 100%; overflow-y: auto; }
-      #chat-col #chat-log { flex: 1 1 auto; height: auto; min-height: 0; }
+      #chat-box { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+      #chat-box #chat-log { flex: 1 1 auto; height: auto; min-height: 0; }
+      #tabs-box { min-height: 13rem; }
+      /* The video is as wide as its column allows, but shrinks on a short screen so the tabs keep 13rem. */
+      #player-wrap { width: min(100%, calc((100vh - 16rem) * 16 / 9)); }
+      /* The song panel is as tall as the video and scrolls inside, so a long reason never pushes the tabs down. */
+      #song-col { position: relative; }
+      #song-panel { position: absolute; top: 0; bottom: 0; left: calc(var(--bs-gutter-x) * .5);
+        right: calc(var(--bs-gutter-x) * .5); display: flex; flex-direction: column; }
+      /* Back/Next stay pinned at the bottom; only the song's details above them scroll. */
+      #song-info { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
     }
     @media (max-width: 991.98px) {
       #tabs-box .tab-pane { max-height: 60vh; overflow-y: auto; }
       #chat-log { height: 55vh; }
     }
-    #player-wrap { aspect-ratio: 16 / 9; }
+    #player-wrap { aspect-ratio: 16 / 9; position: relative; }
+    /* The name floats faintly over the video's top-right corner; clicks go through to the video. */
+    #brand { position: absolute; top: .4rem; right: .7rem; pointer-events: none; font-weight: 600; letter-spacing: .02em;
+      color: #fff; opacity: .35; text-shadow: 0 1px 3px rgba(0, 0, 0, .8); }
+    #status-overlay { position: absolute; top: .45rem; right: 1.4rem; left: .6rem; z-index: 2; display: flex; gap: .3rem;
+      flex-wrap: wrap; justify-content: flex-end; opacity: .45; transition: opacity .15s; pointer-events: none; }
+    #status-overlay > * { pointer-events: auto; white-space: nowrap; }
+    #status-overlay:hover { opacity: 1; }
+    #conn-status { position: absolute; bottom: .6rem; left: .6rem; right: 1.4rem; z-index: 2; white-space: normal;
+      text-align: left; }
     #player-wrap iframe, #player { width: 100%; height: 100%; }
     #queue-list tr { cursor: pointer; }
     #queue-list td.num { width: 2.5rem; }
@@ -45,34 +64,24 @@
   </style>
 </head>
 <body>
-<nav class="navbar bg-body-tertiary mb-3 flex-shrink-0">
-  <div class="container-fluid d-flex gap-3">
-    <span class="navbar-brand">noize-buffet</span>
-    <span id="position" class="text-secondary"></span>
-    <span id="agent-status" class="badge text-bg-info d-none">agent working…</span>
-    <span id="mining-status" class="badge text-bg-secondary d-none" role="button"></span>
-    <span id="conn-status" class="badge text-bg-danger d-none"></span>
-    <span id="save-status" class="badge text-bg-secondary ms-auto">idle</span>
-  </div>
-</nav>
-
-<main id="app" class="container-fluid pb-3">
+<main id="app" class="container-fluid py-3">
   <div class="row g-4">
-    <div class="col-lg-8" id="left-col">
+    <div class="col-lg-8 col-xl-9" id="left-col">
       <div class="row g-3 flex-shrink-0">
-        <div class="col-md-7">
+        <div class="col-md-8">
           <div id="empty-queue" class="alert alert-info d-none">No songs yet. Answer the agent in the chat, or ask it for songs.</div>
-          <div id="player-wrap" class="mb-2"><div id="player"></div></div>
+          <div id="player-wrap" class="mb-2"><div id="player"></div><div id="brand" aria-hidden="true">noize-buffet</div></div>
           <div id="unavailable" class="alert alert-danger d-none"></div>
         </div>
 
-        <div class="col-md-5">
-          <h2 class="h5 mb-0" id="song-title"></h2>
-          <div class="text-secondary" id="song-artist"></div>
+        <div class="col-md-4" id="song-col"><div id="song-panel"><div id="song-info">
+          <h2 class="h6 mb-0" id="song-title"></h2>
+          <div class="small text-secondary" id="song-artist"></div>
+          <div class="small text-secondary" id="position"></div>
           <div class="small text-secondary mb-2" id="song-meta"></div>
           <p class="small" id="song-reason"></p>
 
-          <div id="rating-group" class="btn-group mb-2 flex-wrap" role="group" aria-label="Rating">
+          <div id="rating-group" class="btn-group btn-group-sm mb-2 flex-wrap" role="group" aria-label="Rating">
             <button class="btn btn-outline-success" data-rating="top">top</button>
             <button class="btn btn-outline-success" data-rating="yes">yes</button>
             <button class="btn btn-outline-info" data-rating="good">good</button>
@@ -84,16 +93,17 @@
           <!-- Set by the agent from the chat ("never heard this", "not what I'm after"); shown, not clickable. -->
           <div id="song-tags" class="mb-2 d-flex gap-1 flex-wrap"></div>
 
-          <div class="small text-body-secondary mb-1">Your notes on this song (the agent records them from the chat):</div>
+          <div class="small text-body-secondary mb-1" title="The agent records them from what you say in the chat">Your notes</div>
           <div id="song-notes" class="chat-text small text-body-secondary">none yet</div>
-          <div class="d-flex gap-2 mt-3">
-            <button id="btn-back" class="btn btn-outline-light">⏮ Back</button>
-            <button id="btn-next" class="btn btn-outline-light">Next ⏭</button>
           </div>
-        </div>
+          <div class="d-flex gap-2 pt-2 flex-shrink-0">
+            <button id="btn-back" class="btn btn-sm btn-outline-light">⏮ Back</button>
+            <button id="btn-next" class="btn btn-sm btn-outline-light">Next ⏭</button>
+          </div>
+        </div></div>
       </div>
 
-      <div id="tabs-box" class="mt-3">
+      <div id="tabs-box" class="mt-2">
         <ul class="nav nav-tabs flex-shrink-0" role="tablist">
           <li class="nav-item" role="presentation">
             <button class="nav-link active" id="tab-playlist" data-bs-toggle="tab" data-bs-target="#queue-scroll" type="button" role="tab">Playlist</button>
@@ -136,11 +146,19 @@
       </div>
     </div>
 
-    <div class="col-lg-4" id="chat-col">
-      <h2 class="h6 mb-2">Talk to the agent</h2>
-      <div id="chat-log" class="border rounded p-2 mb-2 bg-body-secondary"></div>
+    <div class="col-lg-4 col-xl-3" id="chat-col">
+      <div id="chat-box" class="position-relative mb-2">
+        <div id="chat-log" class="border rounded p-2 bg-body-secondary"></div>
+        <!-- Status floats faintly over the chat's top-right corner; hover to read it. Connection errors stay solid. -->
+        <div id="status-overlay">
+          <span id="agent-status" class="badge text-bg-info d-none">agent working…</span>
+          <span id="mining-status" class="badge text-bg-secondary d-none" role="button"></span>
+          <span id="save-status" class="badge text-bg-secondary">idle</span>
+        </div>
+        <span id="conn-status" class="badge text-bg-danger d-none"></span>
+      </div>
       <form id="chat-form" class="d-flex gap-2 flex-shrink-0">
-        <textarea id="chat-input" class="form-control" rows="2" placeholder="What do you think of this song? Or ask for anything…"></textarea>
+        <textarea id="chat-input" class="form-control" rows="4" placeholder="What do you think of this song? Or ask for anything…"></textarea>
         <button class="btn btn-primary" type="submit">Send</button>
       </form>
     </div>

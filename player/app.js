@@ -65,7 +65,7 @@ function connOk() {
 }
 
 function setStatus(text, cls) {
-  $('#save-status').text(text).attr('class', 'badge ms-auto ' + cls);
+  $('#save-status').text(text).attr('class', 'badge ' + cls);
 }
 
 function payload(extra) {
@@ -126,7 +126,7 @@ function renderQueue() {
   const $tb = $('#queue-list').empty();
   state.songs.forEach((s, idx) => {
     $('<tr>').attr('data-idx', idx).append(
-      $('<td class="num">'), $('<td>').text(s.artist), $('<td>').text(s.title),
+      $('<td class="num">'), $('<td class="text-nowrap">').text(s.artist), $('<td class="text-nowrap">').text(s.title),
       $('<td class="small text-secondary">').text(s.reason || ''),
       $('<td class="rating">'), $('<td class="heard">')).appendTo($tb);
     renderRow(idx);
@@ -331,7 +331,7 @@ function pollChat() {
   });
 }
 
-// "agent working… 0:47" in the navbar, and a temporary bubble at the bottom of the chat saying what the agent is
+// "agent working… 0:47" over the chat's corner, and a temporary bubble at the bottom of the chat saying what the agent is
 // doing right now ("Searching YouTube (12 songs)… 0:47"), so a long batch visibly isn't stuck.
 function renderAgentStatus() {
   const j = state.jobs;
@@ -361,7 +361,7 @@ function renderAgentStatus() {
 
 // ---------- comment mining ----------
 
-// The "Comment mining" tab, and "mining 1 running, 3 queued" in the navbar.
+// The "Comment mining" tab, and "mining 1 running, 3 queued" over the chat's corner.
 function renderMining(res) {
   const vids = res.videos;
   const active = vids.filter(v => ['downloading', 'filtering', 'extracting'].includes(v.status)).length;
@@ -428,6 +428,11 @@ $(function () {
   $('#debug-log').toggleClass('verbose', verbose);
   $('#debug-verbose').prop('checked', verbose).on('change', function () { state.verbose(this.checked); });
   $('#debug-clear').on('click', () => $('#debug-log').empty());
+  // The chat starts below the floating status badges, however many lines they wrap to.
+  const overlay = document.getElementById('status-overlay');
+  new ResizeObserver(() => {
+    document.getElementById('chat-log').style.setProperty('padding-top', (overlay.offsetHeight + 12) + 'px', 'important');
+  }).observe(overlay);
 
   $('#chat-form').on('submit', function (e) {
     e.preventDefault();
