@@ -23,24 +23,43 @@ const state = {
 
 const cur = () => state.songs[state.i];
 
-// Browser console output, with an [nb] prefix. log(): what happened (songs, ratings, chat, the agent, errors).
-// debug(): the detail behind it (every save, player states, loads); off unless `nb.verbose(true)` in the console,
-// which is remembered in this browser.
-const log = (...args) => console.log('[nb]', ...args);
+// Event log, in the Debug tab and the browser console (with an [nb] prefix). log(): what happened (songs, ratings,
+// chat, the agent). debug(): the detail behind it (every save, player states, loads), shown only with verbose on (the
+// Debug tab's switch, or `nb.verbose(true)` in the console; remembered in this browser). logError(): failures.
+const DEBUG_LINES = 1000;
 let verbose = false;
 try { verbose = localStorage.getItem('nb-verbose') === '1'; } catch (e) { /* storage blocked: stay quiet */ }
-const debug = (...args) => { if (verbose) console.debug('[nb]', ...args); };
+
+function logLine(kind, args) {
+  const text = args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+  const time = new Date().toLocaleTimeString([], {hour12: false});
+  const box = document.getElementById('debug-log');
+  if (!box) return;
+  const pane = box.parentElement;
+  const atBottom = pane.scrollHeight - pane.scrollTop - pane.clientHeight < 30;
+  const line = document.createElement('div');
+  line.className = kind;
+  line.textContent = `${time}  ${text}`;
+  box.appendChild(line);
+  while (box.childElementCount > DEBUG_LINES) box.removeChild(box.firstChild);
+  if (atBottom) pane.scrollTop = pane.scrollHeight;
+}
+const log = (...args) => { console.log('[nb]', ...args); logLine('info', args); };
+const debug = (...args) => { if (verbose) console.debug('[nb]', ...args); logLine('detail', args); };
+const logError = (...args) => { console.error('[nb]', ...args); logLine('err', args); };
 const YT_STATES = {'-1': 'unstarted', 0: 'ended', 1: 'playing', 2: 'paused', 3: 'buffering', 5: 'cued'};
 window.nb = state; // type `nb` in the console to inspect the current state
 state.verbose = on => {
   verbose = !!on;
   try { localStorage.setItem('nb-verbose', verbose ? '1' : '0'); } catch (e) { /* not remembered */ }
+  $('#debug-log').toggleClass('verbose', verbose);
+  $('#debug-verbose').prop('checked', verbose);
   return `verbose console output ${verbose ? 'on' : 'off'}`;
 };
 
 function connError(what, xhr) {
   const msg = (xhr.responseJSON && xhr.responseJSON.error) || (xhr.status ? 'HTTP ' + xhr.status : "can't reach server");
-  console.error('[nb]', what, 'failed:', xhr.status, xhr.responseText);
+  logError(what, 'failed:', xhr.status, xhr.responseText);
   $('#conn-status').removeClass('d-none').text(`${what} failed: ${msg}`);
 }
 
@@ -75,7 +94,7 @@ function save(extra) {
     setStatus('saved ' + new Date().toLocaleTimeString(), 'text-bg-success');
   }).fail(xhr => {
     const msg = (xhr.responseJSON && xhr.responseJSON.error) || xhr.status || 'network';
-    console.error('[nb] save failed:', xhr.status, xhr.responseText, body);
+    logError('save failed:', xhr.status, xhr.responseText, body);
     setStatus('save failed: ' + msg, 'text-bg-warning');
   });
 }
@@ -86,9 +105,11 @@ function renderRow(idx) {
   const s = state.songs[idx];
   const $tr = $(`#queue-list tr[data-idx="${idx}"]`);
   $tr.find('.rating').text(s.rating || '');
-  $tr.find('.heard').text(s.unplayable_error ? 'err ' + s.unplayable_error
-    : (s.furthest_pct != null ? Math.round(s.furthest_pct) + '%' : ''));
   const current = idx === state.i;
+  // The current song shows how far they've got right now, which runs ahead of the last save.
+  const pct = current ? Math.max(state.furthest, s.furthest_pct || 0) : s.furthest_pct;
+  $tr.find('.heard').text(s.unplayable_error ? 'err ' + s.unplayable_error
+    : (s.furthest_pct != null || (current && state.furthest > 0) ? Math.round(pct) + '%' : ''));
   $tr.toggleClass('table-active', current);
   $tr.find('.num').text(current ? '▶' : idx + 1).attr('title', current ? 'Now playing' : null);
 }
@@ -139,9 +160,11 @@ function refreshQueue(initial) {
 
 // ---------- player ----------
 
+// How far into the current song they've got, live in its playlist row (the saved value arrives with each save).
 function showProgress() {
-  const pct = Math.round(state.furthest);
-  $('#progress-bar').css('width', pct + '%').text(pct + '%');
+  const s = cur();
+  if (!s || s.unplayable_error) return;
+  $(`#queue-list tr[data-idx="${state.i}"] .heard`).text(Math.round(state.furthest) + '%');
 }
 
 function cueOrLoad(id, autoplay) {
@@ -244,7 +267,7 @@ function onStateChange(e) {
 
 function onError(e) {
   const why = YT_ERRORS[e.data] || 'unknown';
-  console.error('[nb] YouTube error', e.data, why, cur() ? cur().video_id : '');
+  logError('YouTube error', e.data, why, cur() ? cur().video_id : '');
   $('#unavailable').removeClass('d-none').text(`Unavailable (error ${e.data}: ${why}). Use Next to move on.`);
   save({error: String(e.data)});
 }
@@ -338,7 +361,7 @@ function renderAgentStatus() {
 
 // ---------- comment mining ----------
 
-// The "Comment mining" panel under the playlist, and "mining 1 running, 3 queued" in the navbar.
+// The "Comment mining" tab, and "mining 1 running, 3 queued" in the navbar.
 function renderMining(res) {
   const vids = res.videos;
   const active = vids.filter(v => ['downloading', 'filtering', 'extracting'].includes(v.status)).length;
@@ -407,6 +430,12 @@ $(function () {
   $('#btn-next').on('click', () => { debug('clicked Next'); leaveAndGo(state.i + 1); });
   $('#btn-back').on('click', () => { debug('clicked Back'); leaveAndGo(state.i - 1); });
   $('#queue-list').on('click', 'tr', function () { leaveAndGo(parseInt($(this).data('idx'), 10)); });
+  // Back on the playlist tab: bring the current song into view again.
+  $('#tab-playlist').on('shown.bs.tab', () => markCurrent(true));
+  $('#mining-status').on('click', () => bootstrap.Tab.getOrCreateInstance(document.getElementById('tab-mining')).show());
+  $('#debug-log').toggleClass('verbose', verbose);
+  $('#debug-verbose').prop('checked', verbose).on('change', function () { state.verbose(this.checked); });
+  $('#debug-clear').on('click', () => $('#debug-log').empty());
 
   $('#chat-form').on('submit', function (e) {
     e.preventDefault();
