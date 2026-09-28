@@ -81,18 +81,8 @@
             <button class="btn btn-outline-danger" data-rating="no">no</button>
           </div>
 
-          <div class="form-check form-switch mb-2">
-            <input class="form-check-input" type="checkbox" id="off-brief">
-            <label class="form-check-label" for="off-brief">Good, but off-brief</label>
-          </div>
-          <div class="btn-group btn-group-sm mb-2" role="group" aria-label="New to me">
-            <input type="radio" class="btn-check" name="newtome" id="ntm-new" value="1">
-            <label class="btn btn-outline-light" for="ntm-new">New to me</label>
-            <input type="radio" class="btn-check" name="newtome" id="ntm-knew" value="0">
-            <label class="btn btn-outline-light" for="ntm-knew">Knew it</label>
-            <input type="radio" class="btn-check" name="newtome" id="ntm-unset" value="">
-            <label class="btn btn-outline-secondary" for="ntm-unset">–</label>
-          </div>
+          <!-- Set by the agent from the chat ("never heard this", "not what I'm after"); shown, not clickable. -->
+          <div id="song-tags" class="mb-2 d-flex gap-1 flex-wrap"></div>
 
           <div class="small text-body-secondary mb-1">Your notes on this song (the agent records them from the chat):</div>
           <div id="song-notes" class="chat-text small text-body-secondary">none yet</div>
@@ -109,7 +99,7 @@
             <button class="nav-link active" id="tab-playlist" data-bs-toggle="tab" data-bs-target="#queue-scroll" type="button" role="tab">Playlist</button>
           </li>
           <li class="nav-item" role="presentation">
-            <button class="nav-link" id="tab-mining" data-bs-toggle="tab" data-bs-target="#mining-pane" type="button" role="tab">Comment mining <span id="mining-summary" class="small text-body-secondary"></span></button>
+            <button class="nav-link" id="tab-mining" data-bs-toggle="tab" data-bs-target="#mining-pane" type="button" role="tab">Comment mining</button>
           </li>
           <li class="nav-item" role="presentation">
             <button class="nav-link" id="tab-debug" data-bs-toggle="tab" data-bs-target="#debug-pane" type="button" role="tab">Debug</button>
@@ -124,7 +114,8 @@
           </div>
 
           <div id="mining-pane" class="tab-pane" role="tabpanel">
-            <div class="small text-body-secondary my-2">Songs you rate top or yes, and songs you name, get their YouTube comments read for other artists people mention.</div>
+            <div class="small text-body-secondary my-2">Songs you rate top or yes, and songs you name, get their YouTube comments read for other artists people mention.
+              <span id="mining-summary" class="text-body"></span></div>
             <table class="table table-sm small mb-0">
               <thead><tr><th>Song</th><th>Status</th><th>Filter</th><th>Comments</th><th>Flagged</th><th>Covered</th><th>Mentions</th><th>Notes</th><th>Problems</th></tr></thead>
               <tbody id="mining-list"></tbody>

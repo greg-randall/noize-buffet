@@ -203,14 +203,17 @@ function renderSongNotes() {
   $('#song-notes').text(s && s.notes ? s.notes : 'none yet');
 }
 
-// Rating buttons and toggles for the current song. Also called after the agent replies, since it may have set them.
+// Rating buttons and the agent's tags (new to you, off-brief) for the current song. Also called after the agent
+// replies, since it may have set them.
 function renderSongControls() {
   const s = cur();
   if (!s) return;
   $('#rating-group button').removeClass('active').filter(`[data-rating="${s.rating}"]`).addClass('active');
-  $('#off-brief').prop('checked', Number(s.off_brief) === 1);
-  const ntm = s.new_to_me === null || s.new_to_me === undefined ? '' : String(s.new_to_me);
-  $(`input[name="newtome"][value="${ntm}"]`).prop('checked', true);
+  const tags = [];
+  if (s.new_to_me !== null && s.new_to_me !== undefined) tags.push(Number(s.new_to_me) === 1 ? 'new to you' : 'you knew it');
+  if (Number(s.off_brief) === 1) tags.push('off-brief');
+  $('#song-tags').empty().append(tags.map(t => $('<span class="badge text-bg-secondary">').text(t)))
+    .attr('title', tags.length ? 'Recorded by the agent from the chat; tell it if it read you wrong' : null);
 }
 
 // The current song, sent with each chat message so the agent knows what you're listening to.
@@ -372,7 +375,7 @@ function renderMining(res) {
     .toggleClass('text-bg-warning', !!paused).toggleClass('text-bg-secondary', !paused)
     .attr('title', paused ? paused.message : '')
     .text(paused ? `mining paused until ${until} (out of Claude usage)` : `mining ${active} running, ${queued} queued`);
-  $('#mining-summary').text(`${vids.length} songs, ${res.leads.confirmed} confirmed leads, ${res.leads.hints} hints`);
+  $('#mining-summary').text(`So far: ${vids.length} songs, ${res.leads.confirmed} confirmed leads, ${res.leads.hints} hints.`);
   const $tb = $('#mining-list').empty();
   vids.forEach(v => {
     const filter = v.filter === 'keyword' ? 'keywords (no TypeSafe key)' : (v.filter || '');
@@ -411,20 +414,6 @@ $(function () {
     $(this).addClass('active');
     log('rated', $(this).data('rating'));
     save({rating: $(this).data('rating')});
-  });
-
-  $('#off-brief').on('change', function () {
-    if (!cur()) return;
-    state.interacted = true;
-    log('off-brief', this.checked);
-    save({off_brief: this.checked});
-  });
-
-  $('input[name="newtome"]').on('change', function () {
-    if (!cur()) return;
-    state.interacted = true;
-    log('new to me', this.value === '' ? 'unset' : this.value === '1');
-    save({new_to_me: this.value === '' ? null : this.value === '1'});
   });
 
   $('#btn-next').on('click', () => { debug('clicked Next'); leaveAndGo(state.i + 1); });
