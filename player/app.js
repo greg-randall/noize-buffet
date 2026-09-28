@@ -35,14 +35,11 @@ function logLine(kind, args) {
   const time = new Date().toLocaleTimeString([], {hour12: false});
   const box = document.getElementById('debug-log');
   if (!box) return;
-  const pane = box.parentElement;
-  const atBottom = pane.scrollHeight - pane.scrollTop - pane.clientHeight < 30;
   const line = document.createElement('div');
   line.className = kind;
   line.textContent = `${time}  ${text}`;
-  box.appendChild(line);
-  while (box.childElementCount > DEBUG_LINES) box.removeChild(box.firstChild);
-  if (atBottom) pane.scrollTop = pane.scrollHeight;
+  box.prepend(line); // newest first
+  while (box.childElementCount > DEBUG_LINES) box.removeChild(box.lastChild);
 }
 const log = (...args) => { console.log('[nb]', ...args); logLine('info', args); };
 const debug = (...args) => { if (verbose) console.debug('[nb]', ...args); logLine('detail', args); };
@@ -377,10 +374,16 @@ function renderMining(res) {
     .text(paused ? `mining paused until ${until} (out of Claude usage)` : `mining ${active} running, ${queued} queued`);
   $('#mining-summary').text(`So far: ${vids.length} songs, ${res.leads.confirmed} confirmed leads, ${res.leads.hints} hints.`);
   const $tb = $('#mining-list').empty();
-  vids.forEach(v => {
+  // Most recent activity first, so what just happened is at the top.
+  [...vids].sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || '')).forEach(v => {
+    const d = v.updated_at ? new Date(v.updated_at) : null;
+    const when = !d ? '' : d.toDateString() === new Date().toDateString()
+      ? d.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'})
+      : d.toLocaleDateString([], {month: 'short', day: 'numeric'});
     const filter = v.filter === 'keyword' ? 'keywords (no TypeSafe key)' : (v.filter || '');
     $('<tr>').append(
-      $('<td>').text(v.artist ? `${v.artist} - ${v.title}` : v.video_id), $('<td>').text(v.status),
+      $('<td class="text-nowrap">').text(when), $('<td>').text(v.artist ? `${v.artist} - ${v.title}` : v.video_id),
+      $('<td>').text(v.status),
       $('<td>').text(filter), $('<td>').text(v.comments ?? ''), $('<td>').text(v.flagged ?? ''),
       $('<td>').text(v.covered ?? ''), $('<td>').text(v.mentions ?? ''),
       $('<td class="text-body-secondary">').text(v.notes || ''),
