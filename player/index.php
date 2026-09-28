@@ -35,8 +35,14 @@
     }
     #player-wrap { aspect-ratio: 16 / 9; position: relative; }
     /* The name floats faintly over the video's top-left corner, on top of everything; clicks go through to the video. */
-    #brand { position: absolute; top: .4rem; left: .7rem; z-index: 1000000; pointer-events: none; user-select: none;
-      font-weight: 600; letter-spacing: .02em; color: #fff; opacity: .4; text-shadow: 0 1px 3px rgba(0, 0, 0, .8); }
+    #brand { position: absolute; top: .2rem; left: .8rem; z-index: 1000000; pointer-events: none; user-select: none;
+      font-size: 4rem; line-height: 1.1; font-weight: 800; letter-spacing: .01em; color: #fff; opacity: .8;
+      text-shadow:
+        /* tight: a crisp dark edge all round */
+        -2px 0 2px #000, 2px 0 2px #000, 0 -2px 2px #000, 0 2px 2px #000,
+        /* wide: a soft, offset glow further out */
+        -8px 0 14px rgba(0, 0, 0, .75), 8px 0 14px rgba(0, 0, 0, .75),
+        0 -8px 14px rgba(0, 0, 0, .75), 0 8px 14px rgba(0, 0, 0, .75); }
     #status-overlay { position: absolute; top: .45rem; right: 1.4rem; left: .6rem; z-index: 2; display: flex; gap: .3rem;
       flex-wrap: wrap; justify-content: flex-end; opacity: .45; transition: opacity .15s; pointer-events: none; }
     #status-overlay > * { pointer-events: auto; white-space: nowrap; }
