@@ -291,9 +291,53 @@ def reset():
     print("  Reset done. Starting fresh.\n")
 
 
-def pipe_output(proc, prefix):
+class WebLog:
+    """Quiets the PHP server's log: every request logs three lines (Accepted, the request, Closing), and the page
+    polls every few seconds, which buried the agent's and the miner's lines. Successful requests are only counted,
+    and summarised every WEB_SUMMARY_S seconds; errors, failed requests and anything else still print."""
+    REQUEST = re.compile(r"\] \S+ \[(\d{3})\]: (\w+) (\S+)")
+    CONNECTION = re.compile(r"\] \S+ (Accepted|Closing)$")
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.counts = {}
+
+    def keep(self, line):
+        """True if the line should be printed; a successful request is counted instead."""
+        line = line.rstrip("\n")
+        if self.CONNECTION.search(line):
+            return False
+        m = self.REQUEST.search(line)
+        if not m:
+            return True  # startup lines, PHP warnings and errors
+        status, path = int(m.group(1)), m.group(3)
+        if path.startswith("/favicon.ico"):
+            return False  # browsers ask for it; there isn't one
+        if status >= 400:
+            return True
+        action = re.search(r"[?&]action=(\w+)", path)
+        what = action.group(1) if action else ("page" if path == "/" else path.lstrip("/").split("?")[0])
+        with self.lock:
+            self.counts[what] = self.counts.get(what, 0) + 1
+        return False
+
+    def summary(self):
+        """'312 requests: mining 60, save 30, ...' for the requests counted since the last summary, or None."""
+        with self.lock:
+            counts, self.counts = self.counts, {}
+        if not counts:
+            return None
+        parts = ", ".join(f"{k} {n}" for k, n in sorted(counts.items(), key=lambda kv: -kv[1]))
+        return f"{sum(counts.values())} requests in the last {WEB_SUMMARY_S // 60} min: {parts}"
+
+
+WEB_SUMMARY_S = 300
+
+
+def pipe_output(proc, prefix, web_log=None):
     for line in proc.stdout:
-        print(f"{prefix} {line}", end="", flush=True)
+        if web_log is None or web_log.keep(line):
+            print(f"{prefix} {line}", end="", flush=True)
 
 
 def main():
@@ -321,8 +365,10 @@ def main():
         "[agent]": subprocess.Popen(["php", "scripts/job_worker.php"], **popen),
         "[mine] ": subprocess.Popen(["php", "scripts/mine_worker.php"], **popen),
     }
+    web_log = WebLog()
     for prefix, proc in procs.items():
-        threading.Thread(target=pipe_output, args=(proc, prefix), daemon=True).start()
+        threading.Thread(target=pipe_output, args=(proc, prefix, web_log if prefix.startswith("[web]") else None),
+                         daemon=True).start()
     print(f"\nnoize-buffet is running: open http://localhost:{port}\nPress Ctrl+C to stop.\n", flush=True)
 
     def stop(*_):
@@ -339,7 +385,12 @@ def main():
 
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
+    next_summary = time.monotonic() + WEB_SUMMARY_S
     while True:
+        if time.monotonic() >= next_summary:
+            next_summary += WEB_SUMMARY_S
+            if (text := web_log.summary()) is not None:
+                print(f"[web]    {text}", flush=True)
         for prefix, proc in procs.items():
             if proc.poll() is not None:
                 print(f"\n{prefix.strip()} exited with code {proc.returncode}; stopping the rest.", flush=True)

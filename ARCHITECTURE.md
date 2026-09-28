@@ -8,7 +8,7 @@ How noize-buffet is built, for anyone changing it or debugging it. [README.md](R
 
 | Prefix | Process | Job |
 |---|---|---|
-| `[web]` | `php -S localhost:<port> -t player` (4 workers) | the page and `player/api.php` |
+| `[web]` | `php -S localhost:<port> -t player` (4 workers) | the page and `player/api.php`; `start.py` prints its errors and failed requests, and every 5 minutes a count of the successful ones by action |
 | `[agent]` | `php scripts/job_worker.php` | runs agent jobs one at a time |
 | `[mine]` | `php scripts/mine_worker.php` | mines queued videos' comments, `mining_workers` at a time |
 

@@ -103,5 +103,22 @@ with mock.patch.object(start, "old_processes", return_value=[(123, "claude -p ..
     start.stop_leftovers("Before starting")
 check(sp.called and "pid 123: claude -p" in out.getvalue(), "leftovers are listed and stopped")
 
+print("quieter web server log")
+w = start.WebLog()
+T = "[2048867] [Mon Sep 28 12:27:23 2026] 127.0.0.1:41850 "
+check(not w.keep(T + "Accepted\n") and not w.keep(T + "Closing\n"), "connection lines are dropped")
+check(not w.keep(T + "[200]: GET /api.php?action=mining\n") and not w.keep(T + "[200]: GET /api.php?action=mining")
+      and not w.keep(T + "[200]: POST /api.php?action=save") and not w.keep(T + "[200]: GET /")
+      and not w.keep(T + "[200]: GET /app.css?v=179"), "successful requests are counted, not printed")
+check(not w.keep(T + "[404]: GET /favicon.ico - No such file or directory"), "the missing favicon is dropped")
+check(w.keep(T + "[500]: POST /api.php?action=send") and w.keep(T + "[404]: GET /nope"), "failed requests still print")
+check(w.keep("[Mon Sep 28 12:26:59 2026] PHP 8.1.2 Development Server (http://localhost:8000) started")
+      and w.keep("PHP Warning:  Undefined array key 0 in /x/api.php on line 3"),
+      "startup lines and PHP warnings still print")
+got = w.summary()
+check(got == "5 requests in the last 5 min: mining 2, save 1, page 1, app.css 1",
+      f"the summary counts them by action, most first (got {got})")
+check(w.summary() is None, "and starts again from zero; nothing counted: no summary")
+
 print("ALL PASSED" if fails == 0 else f"FAILED {fails}")
 sys.exit(1 if fails else 0)
