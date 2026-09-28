@@ -71,10 +71,6 @@
           <div class="text-secondary" id="song-artist"></div>
           <div class="small text-secondary mb-2" id="song-meta"></div>
           <p class="small" id="song-reason"></p>
-          <div class="d-flex gap-2 mb-3">
-            <button id="btn-back" class="btn btn-outline-light">⏮ Back</button>
-            <button id="btn-next" class="btn btn-outline-light">Next ⏭</button>
-          </div>
 
           <div id="rating-group" class="btn-group mb-2 flex-wrap" role="group" aria-label="Rating">
             <button class="btn btn-outline-success" data-rating="top">top</button>
@@ -100,6 +96,10 @@
 
           <div class="small text-body-secondary mb-1">Your notes on this song (the agent records them from the chat):</div>
           <div id="song-notes" class="chat-text small text-body-secondary">none yet</div>
+          <div class="d-flex gap-2 mt-3">
+            <button id="btn-back" class="btn btn-outline-light">⏮ Back</button>
+            <button id="btn-next" class="btn btn-outline-light">Next ⏭</button>
+          </div>
         </div>
       </div>
 
