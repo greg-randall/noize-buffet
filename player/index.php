@@ -41,13 +41,14 @@
        go through to the video. */
     #brand { position: absolute; top: -12px; left: -6px; z-index: 1000000; pointer-events: none; user-select: none;
       font-family: 'Geo', sans-serif; font-size: 4rem; line-height: .75; text-transform: uppercase; letter-spacing: .02em;
-      padding: .05em 0 0 .05em; color: #fff; opacity: .8;
+      padding: .05em 0 0 .05em; color: #fff; opacity: .9;
       text-shadow:
-        /* tight: a crisp dark edge all round */
-        -2px 0 2px #000, 2px 0 2px #000, 0 -2px 2px #000, 0 2px 2px #000,
-        /* wide: a soft, offset glow further out */
-        -8px 0 14px rgba(0, 0, 0, .75), 8px 0 14px rgba(0, 0, 0, .75),
-        0 -8px 14px rgba(0, 0, 0, .75), 0 8px 14px rgba(0, 0, 0, .75); }
+        /* tight: a heavy dark edge all round, diagonals included */
+        -3px 0 4px #000, 3px 0 4px #000, 0 -3px 4px #000, 0 3px 4px #000,
+        -3px -3px 4px #000, 3px -3px 4px #000, -3px 3px 4px #000, 3px 3px 4px #000,
+        /* wide: a dark, blurry halo well out from the letters */
+        -16px 0 28px #000, 16px 0 28px #000, 0 -16px 28px #000, 0 16px 28px #000,
+        -12px -12px 28px #000, 12px -12px 28px #000, -12px 12px 28px #000, 12px 12px 28px #000; }
     #status-overlay { position: absolute; top: .45rem; right: 1.4rem; left: .6rem; z-index: 2; display: flex; gap: .3rem;
       flex-wrap: wrap; justify-content: flex-end; opacity: .45; transition: opacity .15s; pointer-events: none; }
     #status-overlay > * { pointer-events: auto; white-space: nowrap; }
