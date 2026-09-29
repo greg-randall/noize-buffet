@@ -17,7 +17,40 @@
   --bs-link-hover-color: #dc9474;
   --bs-link-hover-color-rgb: 220, 148, 116;
   --bs-focus-ring-color: rgba(196, 67, 43, .35);
+  /* Warm greys in place of Bootstrap's cool blue-greys: a little red and yellow in each, not enough to look brown. */
+  --bs-body-bg: #221f1d;
+  --bs-body-bg-rgb: 34, 31, 29;
+  --bs-body-color: #e4ded9;
+  --bs-body-color-rgb: 228, 222, 217;
+  --bs-emphasis-color: #fbf7f3;
+  --bs-secondary-bg: #36312d;
+  --bs-secondary-bg-rgb: 54, 49, 45;
+  --bs-tertiary-bg: #2c2825;
+  --bs-tertiary-bg-rgb: 44, 40, 37;
+  --bs-secondary-color: rgba(228, 222, 217, .72);
+  --bs-tertiary-color: rgba(228, 222, 217, .5);
+  --bs-border-color: #514944;
+  --bs-secondary-rgb: 122, 113, 106;
+  --bs-secondary-border-subtle: #5a514b;
+  --bs-light-rgb: 244, 239, 234;
 }
+.btn-light {
+  --bs-btn-bg: #f4efea; --bs-btn-border-color: #f4efea; --bs-btn-color: #221f1d;
+  --bs-btn-hover-bg: #e6ded7; --bs-btn-hover-border-color: #e6ded7;
+  --bs-btn-active-bg: #d9d0c8; --bs-btn-active-border-color: #d9d0c8;
+}
+.btn-outline-light {
+  --bs-btn-color: #f4efea; --bs-btn-border-color: #f4efea;
+  --bs-btn-hover-bg: #f4efea; --bs-btn-hover-border-color: #f4efea; --bs-btn-hover-color: #221f1d;
+  --bs-btn-active-bg: #f4efea; --bs-btn-active-color: #221f1d;
+}
+.btn-outline-secondary {
+  --bs-btn-color: #a39a93; --bs-btn-border-color: #7a716a;
+  --bs-btn-hover-bg: #7a716a; --bs-btn-hover-border-color: #7a716a; --bs-btn-hover-color: #fbf7f3;
+  --bs-btn-active-bg: #7a716a; --bs-btn-active-border-color: #7a716a; --bs-btn-active-color: #fbf7f3;
+}
+/* The song playing now: an oxblood row in the playlist. */
+#queue-list tr.table-active { --bs-table-bg-state: #4b1a22; --bs-table-color-state: #fbf7f3; }
 .btn-primary {
   --bs-btn-bg: var(--nb-vermilion); --bs-btn-border-color: var(--nb-vermilion);
   --bs-btn-hover-bg: var(--nb-vermilion-hover); --bs-btn-hover-border-color: var(--nb-vermilion-hover);
@@ -59,7 +92,7 @@
    go through to the video. */
 #brand { position: absolute; top: -16px; left: -12px; z-index: 1000000; pointer-events: none; user-select: none;
   font-family: 'Geo', sans-serif; font-size: 4rem; line-height: .75; text-transform: uppercase; letter-spacing: -.09em;
-  color: #fff; opacity: .9;
+  color: var(--nb-vermilion-hover); opacity: .9;
   text-shadow:
     /* tight: a heavy dark edge all round, diagonals included */
     -3px 0 4px #000, 3px 0 4px #000, 0 -3px 4px #000, 0 3px 4px #000,
@@ -94,6 +127,6 @@
 
 /* Over the video when YouTube won't play it here: the reason and a big button to play it on youtube.com. */
 #blocked-overlay { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center;
-  justify-content: center; gap: 1rem; padding: 2rem; text-align: center; background: rgba(15, 15, 18, .94); }
+  justify-content: center; gap: 1rem; padding: 2rem; text-align: center; background: rgba(24, 20, 18, .95); }
 #blocked-overlay.d-none { display: none !important; }
 .blocked-why { font-size: 1.1rem; max-width: 34rem; }
