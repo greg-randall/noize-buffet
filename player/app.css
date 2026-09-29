@@ -17,40 +17,40 @@
   --bs-link-hover-color: #dc9474;
   --bs-link-hover-color-rgb: 220, 148, 116;
   --bs-focus-ring-color: rgba(196, 67, 43, .35);
-  /* Warm greys in place of Bootstrap's cool blue-greys: a little red and yellow in each, not enough to look brown. */
-  --bs-body-bg: #221f1d;
-  --bs-body-bg-rgb: 34, 31, 29;
-  --bs-body-color: #e4ded9;
-  --bs-body-color-rgb: 228, 222, 217;
-  --bs-emphasis-color: #fbf7f3;
-  --bs-secondary-bg: #36312d;
-  --bs-secondary-bg-rgb: 54, 49, 45;
-  --bs-tertiary-bg: #2c2825;
-  --bs-tertiary-bg-rgb: 44, 40, 37;
-  --bs-secondary-color: rgba(228, 222, 217, .72);
-  --bs-tertiary-color: rgba(228, 222, 217, .5);
-  --bs-border-color: #514944;
-  --bs-secondary-rgb: 122, 113, 106;
-  --bs-secondary-border-subtle: #5a514b;
-  --bs-light-rgb: 244, 239, 234;
+  /* Warm greys in place of Bootstrap's cool blue-greys: the lightest touch of warmth, not enough to look brown. */
+  --bs-body-bg: #262523;
+  --bs-body-bg-rgb: 38, 37, 35;
+  --bs-body-color: #e3e1de;
+  --bs-body-color-rgb: 227, 225, 222;
+  --bs-emphasis-color: #faf9f7;
+  --bs-secondary-bg: #363432;
+  --bs-secondary-bg-rgb: 54, 52, 50;
+  --bs-tertiary-bg: #2e2d2b;
+  --bs-tertiary-bg-rgb: 46, 45, 43;
+  --bs-secondary-color: rgba(227, 225, 222, .72);
+  --bs-tertiary-color: rgba(227, 225, 222, .5);
+  --bs-border-color: #4e4c49;
+  --bs-secondary-rgb: 117, 114, 110;
+  --bs-secondary-border-subtle: #57544f;
+  --bs-light-rgb: 243, 241, 238;
 }
 .btn-light {
-  --bs-btn-bg: #f4efea; --bs-btn-border-color: #f4efea; --bs-btn-color: #221f1d;
-  --bs-btn-hover-bg: #e6ded7; --bs-btn-hover-border-color: #e6ded7;
-  --bs-btn-active-bg: #d9d0c8; --bs-btn-active-border-color: #d9d0c8;
+  --bs-btn-bg: #f3f1ee; --bs-btn-border-color: #f3f1ee; --bs-btn-color: #262523;
+  --bs-btn-hover-bg: #e5e2de; --bs-btn-hover-border-color: #e5e2de;
+  --bs-btn-active-bg: #d8d5d0; --bs-btn-active-border-color: #d8d5d0;
 }
 .btn-outline-light {
-  --bs-btn-color: #f4efea; --bs-btn-border-color: #f4efea;
-  --bs-btn-hover-bg: #f4efea; --bs-btn-hover-border-color: #f4efea; --bs-btn-hover-color: #221f1d;
-  --bs-btn-active-bg: #f4efea; --bs-btn-active-color: #221f1d;
+  --bs-btn-color: #f3f1ee; --bs-btn-border-color: #f3f1ee;
+  --bs-btn-hover-bg: #f3f1ee; --bs-btn-hover-border-color: #f3f1ee; --bs-btn-hover-color: #262523;
+  --bs-btn-active-bg: #f3f1ee; --bs-btn-active-color: #262523;
 }
 .btn-outline-secondary {
-  --bs-btn-color: #a39a93; --bs-btn-border-color: #7a716a;
-  --bs-btn-hover-bg: #7a716a; --bs-btn-hover-border-color: #7a716a; --bs-btn-hover-color: #fbf7f3;
-  --bs-btn-active-bg: #7a716a; --bs-btn-active-border-color: #7a716a; --bs-btn-active-color: #fbf7f3;
+  --bs-btn-color: #a19e99; --bs-btn-border-color: #75726e;
+  --bs-btn-hover-bg: #75726e; --bs-btn-hover-border-color: #75726e; --bs-btn-hover-color: #faf9f7;
+  --bs-btn-active-bg: #75726e; --bs-btn-active-border-color: #75726e; --bs-btn-active-color: #faf9f7;
 }
 /* The song playing now: an oxblood row in the playlist. */
-#queue-list tr.table-active { --bs-table-bg-state: #4b1a22; --bs-table-color-state: #fbf7f3; }
+#queue-list tr.table-active { --bs-table-bg-state: #4b1a22; --bs-table-color-state: #faf9f7; }
 .btn-primary {
   --bs-btn-bg: var(--nb-vermilion); --bs-btn-border-color: var(--nb-vermilion);
   --bs-btn-hover-bg: var(--nb-vermilion-hover); --bs-btn-hover-border-color: var(--nb-vermilion-hover);
@@ -100,7 +100,10 @@
     /* wide: a dark, blurry halo well out from the letters */
     -16px 0 28px #000, 16px 0 28px #000, 0 -16px 28px #000, 0 16px 28px #000,
     -12px -12px 28px #000, 12px -12px 28px #000, -12px 12px 28px #000, 12px 12px 28px #000; }
-#status-bar .badge { white-space: nowrap; }
+/* One line, always: a badge that doesn't fit shrinks and ends in "…" (hover for the whole text). */
+#status-bar { flex-wrap: nowrap !important; min-width: 0; }
+#status-bar .badge { white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
+#status-bar #save-status { flex-shrink: 0; }
 #conn-status { white-space: normal; text-align: left; }
 #player-wrap iframe, #player { width: 100%; height: 100%; }
 #queue-list tr { cursor: pointer; }
@@ -127,6 +130,20 @@
 
 /* Over the video when YouTube won't play it here: the reason and a big button to play it on youtube.com. */
 #blocked-overlay { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center;
-  justify-content: center; gap: 1rem; padding: 2rem; text-align: center; background: rgba(24, 20, 18, .95); }
+  justify-content: center; gap: 1rem; padding: 2rem; text-align: center; background: rgba(26, 25, 24, .95); }
 #blocked-overlay.d-none { display: none !important; }
 .blocked-why { font-size: 1.1rem; max-width: 34rem; }
+
+/* Rating buttons: one muted scale from best to worst, each a clearly different hue at a similar brightness, so no
+   step shouts louder than the rest. Outlined until chosen; the chosen one fills in. */
+.rate[data-rating=top] { --rate: #6fa86b; }  /* moss green */
+.rate[data-rating=yes] { --rate: #a8b35f; }  /* olive */
+.rate[data-rating=good] { --rate: #cfa55c; } /* ochre */
+.rate[data-rating=ok] { --rate: #9a9793; }   /* warm grey */
+.rate[data-rating=meh] { --rate: #c77a55; }  /* terracotta */
+.rate[data-rating=no] { --rate: #bf4a4a; }   /* brick red */
+.rate {
+  --bs-btn-color: var(--rate); --bs-btn-border-color: var(--rate);
+  --bs-btn-hover-color: #1d1c1b; --bs-btn-hover-bg: var(--rate); --bs-btn-hover-border-color: var(--rate);
+  --bs-btn-active-color: #1d1c1b; --bs-btn-active-bg: var(--rate); --bs-btn-active-border-color: var(--rate);
+}

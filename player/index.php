@@ -38,12 +38,12 @@
           <div class="text-body-secondary mb-3" id="song-artist"></div>
 
           <div id="rating-group" class="btn-group btn-group-sm w-100 mb-2" role="group" aria-label="Rating">
-            <button class="btn btn-outline-success" data-rating="top">top</button>
-            <button class="btn btn-outline-success" data-rating="yes">yes</button>
-            <button class="btn btn-outline-info" data-rating="good">good</button>
-            <button class="btn btn-outline-secondary" data-rating="ok">ok</button>
-            <button class="btn btn-outline-warning" data-rating="meh">meh</button>
-            <button class="btn btn-outline-danger" data-rating="no">no</button>
+            <button class="btn rate" data-rating="top">top</button>
+            <button class="btn rate" data-rating="yes">yes</button>
+            <button class="btn rate" data-rating="good">good</button>
+            <button class="btn rate" data-rating="ok">ok</button>
+            <button class="btn rate" data-rating="meh">meh</button>
+            <button class="btn rate" data-rating="no">no</button>
           </div>
           <!-- Set by the agent from the chat ("never heard this", "not what I'm after"); shown, not clickable. -->
           <div id="song-tags" class="mb-2 d-flex gap-1 flex-wrap"></div>
@@ -106,7 +106,7 @@
     </div>
 
     <div class="col-lg-4 col-xl-3" id="chat-col">
-      <div id="status-bar" class="d-flex flex-wrap justify-content-end gap-1 mb-2 flex-shrink-0">
+      <div id="status-bar" class="d-flex justify-content-end gap-1 mb-2 flex-shrink-0">
         <span id="conn-status" class="badge text-bg-danger d-none me-auto"></span>
         <span id="agent-status" class="badge d-none">agent working…</span>
         <span id="mining-status" class="badge text-bg-secondary d-none" role="button"></span>

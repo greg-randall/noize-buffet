@@ -88,7 +88,7 @@ function save(extra) {
     debug('save ✓', res.row);
     Object.assign(state.songs[idx], res.row);
     renderRow(idx);
-    setStatus('saved ' + new Date().toLocaleTimeString(), 'text-bg-success');
+    setStatus('saved ' + new Date().toLocaleTimeString([], {hour: 'numeric', minute: '2-digit', hour12: false}), 'text-bg-success');
   }).fail(xhr => {
     const msg = (xhr.responseJSON && xhr.responseJSON.error) || xhr.status || 'network';
     logError('save failed:', xhr.status, xhr.responseText, body);
@@ -380,7 +380,8 @@ function renderAgentStatus() {
     const s = Math.max(0, Math.floor((Date.now() - Date.parse(j.running.started_at)) / 1000));
     timer = ` ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   }
-  $('#agent-status').toggleClass('d-none', !busy).text(j && j.running ? `agent working…${timer}` : 'waiting for the agent…');
+  $('#agent-status').toggleClass('d-none', !busy).text(j && j.running ? `working…${timer}` : 'waiting…')
+    .attr('title', j && j.running ? 'The agent is working on your message' : 'Your message is waiting for the agent');
 
   let $bubble = $('#agent-activity');
   if (!busy) { $bubble.remove(); return; }
@@ -409,8 +410,8 @@ function renderMining(res) {
   const until = paused && new Date(paused.until * 1000).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
   $('#mining-status').toggleClass('d-none', !active && !queued && !paused)
     .toggleClass('text-bg-warning', !!paused).toggleClass('text-bg-secondary', !paused)
-    .attr('title', paused ? paused.message : '')
-    .text(paused ? `mining paused until ${until} (out of Claude usage)` : `mining ${active} running, ${queued} queued`);
+    .text(paused ? `mining paused until ${until}` : `mining ${active} · ${queued}`)
+    .attr('title', paused ? `Out of Claude usage: ${paused.message}` : `${active} songs being mined, ${queued} waiting (click for details)`);
   $('#mining-summary').text(`So far: ${vids.length} songs, ${res.leads.confirmed} confirmed leads, ${res.leads.hints} hints.`);
   const $tb = $('#mining-list').empty();
   // Most recent activity first, so what just happened is at the top.
