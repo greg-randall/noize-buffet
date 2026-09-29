@@ -373,14 +373,28 @@ def main():
                          daemon=True).start()
     print(f"\nnoize-buffet is running: open http://localhost:{port}\nPress Ctrl+C to stop.\n", flush=True)
 
+    stopping = []
+
     def stop(*_):
-        print("\nStopping...", flush=True)
+        """Ctrl+C: SIGTERM each group (web server and its workers, agent, mining); anything still alive after a few
+        seconds gets SIGKILL, and a second Ctrl+C kills at once instead of waiting."""
+        hard = bool(stopping)
+        stopping.append(1)
+        print("\nStopping..." if not hard else "\nKilling...", flush=True)
+        sig = signal.SIGKILL if hard else signal.SIGTERM
         for proc in procs.values():
             try:
-                os.killpg(proc.pid, signal.SIGTERM)  # the whole group: server workers, agent and mining
+                os.killpg(proc.pid, sig)
             except ProcessLookupError:
                 pass
+        deadline = time.time() + 5
+        while any(p.poll() is None for p in procs.values()) and time.time() < deadline:
+            time.sleep(0.1)
         for proc in procs.values():
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)  # the group can outlive its leader
+            except ProcessLookupError:
+                pass
             proc.wait()
         stop_leftovers("Almost stopped")
         sys.exit(0)
