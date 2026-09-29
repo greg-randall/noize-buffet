@@ -129,12 +129,12 @@ Take the date and unix time from the "Sent at" line at the top of each message, 
 Most chat messages arrive with a line saying what the user is listening to, e.g. `(They are currently listening to: Artist - Title [video_id …], heard 64%, rating: yes.)`.
 
 - If the message is a reaction to that song ("love the drums", "too slow", "meh"), record it: `php bin/nb.php note <video_id> "their words"`. **Clean it up**: fix typos, spelling, capitals and punctuation, and drop filler ("man", "like"), but keep their words, meaning and tone, and don't add your own interpretation. For example, "almost htere but the rap is just kind ageneric" becomes "Almost there, but the rap is kind of generic." Add the gist under **You said** in `taste.md`.
-- **Fill in the rating and toggles from what they said**, so they don't have to click: `php bin/nb.php set <video_id> …`. The page has no buttons for `new_to_me` and `off_brief` (it only shows them), so the chat is the only way those get set. Only set what the comment clearly tells you:
+- **Fill in the rating and toggles from what they said**, so they don't have to click: `php bin/nb.php set <video_id> …` (the page has buttons for all of them too). Only set what the comment clearly tells you:
   - rating: "obsessed", "this is it" → `top`; "love this", "great" → `yes`; "pretty good" → `good`; "it's fine" → `ok`; "meh", "not really" → `meh`; "hate this", "no" → `no`
   - "never heard this before" → `new_to_me=1`; "I already know this one" → `new_to_me=0`
   - "cool, but not what I'm after" → `off_brief=1`
   - If the song context shows they already rated it, only change the rating when the comment clearly disagrees with it.
-  - Say what you set in your reply ("Marked it **yes** and new to you."), so they can change it if you read them wrong. Their own rating clicks always win; never re-set a rating they changed by hand.
+  - Say what you set in your reply ("Marked it **yes** and new to you."), so they can change it if you read them wrong. Their own clicks always win; never re-set something they changed by hand.
 - If the message is about something else ("more songs please", "enough of X"), don't record it as a note on the song or set anything.
 - Reply briefly. A follow-up question is **optional and should be rare**: ask only when the answer would clearly change what you suggest next, never after every comment, and never more than one. Most comments just need a short acknowledgement.
 

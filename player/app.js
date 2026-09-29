@@ -88,7 +88,7 @@ function save(extra) {
     debug('save ✓', res.row);
     Object.assign(state.songs[idx], res.row);
     renderRow(idx);
-    setStatus('saved ' + new Date().toLocaleTimeString([], {hour: 'numeric', minute: '2-digit', hour12: false}), 'text-bg-success');
+    setStatus('saved ' + new Date().toLocaleTimeString([], {hour: 'numeric', minute: '2-digit', hour12: false}), 'text-bg-secondary');
   }).fail(xhr => {
     const msg = (xhr.responseJSON && xhr.responseJSON.error) || xhr.status || 'network';
     logError('save failed:', xhr.status, xhr.responseText, body);
@@ -220,11 +220,9 @@ function renderSongControls() {
   const s = cur();
   if (!s) return;
   $('#rating-group button').removeClass('active').filter(`[data-rating="${s.rating}"]`).addClass('active');
-  const tags = [];
-  if (s.new_to_me !== null && s.new_to_me !== undefined) tags.push(Number(s.new_to_me) === 1 ? 'new to you' : 'you knew it');
-  if (Number(s.off_brief) === 1) tags.push('off-brief');
-  $('#song-tags').empty().append(tags.map(t => $('<span class="badge text-bg-secondary">').text(t)))
-    .attr('title', tags.length ? 'Recorded by the agent from the chat; tell it if it read you wrong' : null);
+  const ntm = s.new_to_me === null || s.new_to_me === undefined ? null : Number(s.new_to_me);
+  $('#tag-new').toggleClass('on', ntm === 1).toggleClass('knew', ntm === 0).text(ntm === 0 ? 'knew it' : 'new to you');
+  $('#tag-offbrief').toggleClass('on', Number(s.off_brief) === 1);
 }
 
 // The current song, sent with each chat message so the agent knows what you're listening to.
@@ -459,6 +457,26 @@ $(function () {
     $(this).addClass('active');
     log('rated', $(this).data('rating'));
     save({rating: $(this).data('rating')});
+  });
+
+  // new to you → knew it → not set; off-brief on/off. The page shows the change at once; the save confirms it.
+  $('#tag-new').on('click', () => {
+    const s = cur();
+    if (!s) return;
+    const now = s.new_to_me === null || s.new_to_me === undefined ? null : Number(s.new_to_me);
+    const next = now === null ? 1 : now === 1 ? 0 : null;
+    s.new_to_me = next;
+    renderSongControls();
+    log('new to me', next === null ? 'unset' : next === 1);
+    save({new_to_me: next === null ? null : next === 1});
+  });
+  $('#tag-offbrief').on('click', () => {
+    const s = cur();
+    if (!s) return;
+    s.off_brief = Number(s.off_brief) === 1 ? 0 : 1;
+    renderSongControls();
+    log('off-brief', s.off_brief === 1);
+    save({off_brief: s.off_brief === 1});
   });
 
   $('#btn-next').on('click', () => { debug('clicked Next'); leaveAndGo(state.i + 1); });

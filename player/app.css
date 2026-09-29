@@ -147,3 +147,10 @@
   --bs-btn-hover-color: #1d1c1b; --bs-btn-hover-bg: var(--rate); --bs-btn-hover-border-color: var(--rate);
   --bs-btn-active-color: #1d1c1b; --bs-btn-active-bg: var(--rate); --bs-btn-active-border-color: var(--rate);
 }
+
+/* "new to you" and "off-brief": small pills, outlined when off, filled when on ("knew it" fills in grey). */
+.tag-toggle { font-size: .75rem; font-weight: 600; line-height: 1; padding: .3em .7em; border-radius: 999px;
+  border: 1px solid var(--nb-terracotta); color: var(--nb-terracotta); background: transparent; cursor: pointer; }
+.tag-toggle:hover { border-color: #dc9474; color: #dc9474; }
+.tag-toggle.on { background: var(--nb-terracotta); color: #1d1c1b; }
+.tag-toggle.knew { border-color: #75726e; background: #75726e; color: #faf9f7; }

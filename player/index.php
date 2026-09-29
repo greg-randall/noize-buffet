@@ -45,8 +45,12 @@
             <button class="btn rate" data-rating="meh">meh</button>
             <button class="btn rate" data-rating="no">no</button>
           </div>
-          <!-- Set by the agent from the chat ("never heard this", "not what I'm after"); shown, not clickable. -->
-          <div id="song-tags" class="mb-2 d-flex gap-1 flex-wrap"></div>
+          <!-- Outlined when off, filled when on. Click them, or the agent sets them from the chat ("never heard this",
+               "not what I'm after"). -->
+          <div id="song-tags" class="mb-2 d-flex gap-1 flex-wrap">
+            <button id="tag-new" class="tag-toggle" type="button" title="Click: new to you, then you knew it, then not set">new to you</button>
+            <button id="tag-offbrief" class="tag-toggle" type="button" title="Good, but not what you're looking for here">off-brief</button>
+          </div>
 
           <div class="panel-label mt-3">Why it's here</div>
           <p class="small mb-1" id="song-reason"></p>
