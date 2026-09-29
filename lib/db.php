@@ -456,6 +456,34 @@ function nb_jobs_recover_interrupted(PDO $pdo): int
     });
 }
 
+/** Put a job back in the queue (e.g. it hit the usage limit), noting why it's waiting. */
+function nb_job_requeue(PDO $pdo, int $id, string $why): void
+{
+    nb_write($pdo, fn() => $pdo->prepare("UPDATE jobs SET status = 'queued', started_at = NULL, error = ? WHERE id = ?")
+        ->execute([$why, $id]));
+}
+
+/**
+ * Chat messages that failed only because the usage limit was hit, after the agent's last finished job, go back in
+ * the queue so they're sent once usage is back (older ones are left alone: the conversation has moved on).
+ * Returns how many.
+ */
+function nb_jobs_requeue_usage_failed(PDO $pdo): int
+{
+    return nb_write($pdo, function () use ($pdo): int {
+        $rows = $pdo->query("SELECT id, error FROM jobs WHERE status = 'failed' AND kind = 'chat'
+            AND id > COALESCE((SELECT MAX(id) FROM jobs WHERE status = 'done'), 0) ORDER BY id")->fetchAll();
+        $n = 0;
+        foreach ($rows as $r) {
+            if (nb_usage_limit((string)$r['error']) !== null) {
+                nb_job_requeue($pdo, (int)$r['id'], 'waiting: failed on the usage limit, sent again once usage was back');
+                $n++;
+            }
+        }
+        return $n;
+    });
+}
+
 function nb_job_status(PDO $pdo): array
 {
     return nb_locked($pdo, function () use ($pdo): array {

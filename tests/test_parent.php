@@ -189,15 +189,18 @@ $sidBefore = nb_setting($pdo, 'parent_session_id');
 $lid = nb_job_enqueue($pdo, 'chat', ['message' => 'FAKE_LIMIT']);
 $s = nb_run_parent_job($pdo, nb_job_next($pdo), $config, $parent);
 $job = $pdo->query("SELECT status, error FROM jobs WHERE id = $lid")->fetch();
-check(!$s['ok'] && $job['status'] === 'failed' && str_contains((string)$job['error'], 'weekly limit'), 'the job fails with the limit message');
+check(!$s['ok'] && $job['status'] === 'queued' && str_contains((string)$job['error'], 'weekly limit'),
+    'the message goes back in the queue, noting the limit');
 $msgs = nb_chat_since($pdo, 0);
 $last = end($msgs);
-check($last['role'] === 'system' && str_contains($last['text'], 'out of Claude usage') && str_contains($last['text'], 'send it again')
-    && !str_contains($last['text'], 'hit an error'), 'the chat says plainly it is out of usage, not "hit an error"');
+check($last['role'] === 'system' && str_contains($last['text'], 'out of Claude usage') && str_contains($last['text'], 'automatically')
+    && !str_contains($last['text'], 'hit an error'), 'the chat says it is out of usage and the message will be sent automatically');
 check(str_contains($last['text'], 'resets 2pm (America/New_York)'), "and quotes when it resets");
 check(nb_usage_paused($pdo) !== null, 'usage is marked paused, so mining and refills wait');
 check($sidBefore !== null && nb_setting($pdo, 'parent_session_id') === $sidBefore, 'the conversation is kept for when usage is back');
 nb_usage_clear($pdo);
+// (the fake agent always answers FAKE_LIMIT with the limit, so take that message out of the queue by hand)
+$pdo->exec("UPDATE jobs SET status = 'failed' WHERE id = $lid");
 $s = $run(['message' => 'after the reset']);
 check($s['ok'] && in_array('--resume', $args(), true) && in_array($sidBefore, $args(), true), 'the next job resumes that conversation');
 

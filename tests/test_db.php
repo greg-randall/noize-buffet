@@ -231,4 +231,23 @@ check($c['refill'] === false && str_contains($c['why'], 'out of Claude usage'), 
 nb_usage_clear($u);
 check(nb_usage_paused($u) === null && nb_refill_check($u, 5)['refill'] === true, 'clearing the pause lets refills run again');
 
+echo "messages that hit the usage limit go back in the queue\n";
+$pdo->exec("DELETE FROM jobs");
+$lim = "Claude AI usage limit reached|You've hit your session limit · resets 1:50pm (America/New_York)";
+$old = nb_job_enqueue($pdo, 'chat', ['message' => 'old, before the last reply']);
+nb_job_next($pdo); nb_job_finish($pdo, $old, false, null, $lim, null);
+$done = nb_job_enqueue($pdo, 'chat', ['message' => 'answered']);
+nb_job_next($pdo); nb_job_finish($pdo, $done, true, 'ok', null, null);
+$a = nb_job_enqueue($pdo, 'chat', ['message' => 'first after']);
+nb_job_next($pdo); nb_job_finish($pdo, $a, false, null, $lim, null);
+$b = nb_job_enqueue($pdo, 'chat', ['message' => 'second after']);
+nb_job_next($pdo); nb_job_finish($pdo, $b, false, null, $lim, null);
+$c = nb_job_enqueue($pdo, 'chat', ['message' => 'a real error']);
+nb_job_next($pdo); nb_job_finish($pdo, $c, false, null, 'boom', null);
+check(nb_jobs_requeue_usage_failed($pdo) === 2, 'the two usage-limit failures after the last reply are requeued');
+$st = $pdo->query('SELECT id, status FROM jobs ORDER BY id')->fetchAll(PDO::FETCH_KEY_PAIR);
+check($st[$a] === 'queued' && $st[$b] === 'queued' && $st[$old] === 'failed' && $st[$c] === 'failed',
+    'not the one from before the last reply, nor a real error');
+check(nb_job_next($pdo)['id'] === $a && nb_job_next($pdo)['id'] === $b, 'and they come back in the order they were sent');
+
 finish();

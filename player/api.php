@@ -84,6 +84,10 @@ try {
             }
             $chatId = nb_chat_add($pdo, 'user', $message);
             $jobId = nb_job_enqueue($pdo, 'chat', ['message' => $message, 'song' => nb_song_context($in['song'] ?? null)]);
+            if ($paused = nb_usage_paused($pdo)) {
+                nb_chat_add($pdo, 'system', "Saved. You're out of Claude usage (\"{$paused['message']}\"), so this goes to "
+                    . 'the agent automatically when it resets.', $jobId);
+            }
             respond(['ok' => true, 'chat_id' => $chatId, 'job_id' => $jobId]);
 
         case 'start':

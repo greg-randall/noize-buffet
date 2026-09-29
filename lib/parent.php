@@ -321,12 +321,13 @@ function nb_run_parent_job(PDO $pdo, array $job, array $config, NbParentProcess 
     }
 
     if (!$ok && ($limit = nb_usage_limit($error)) !== null) {
-        // Not the agent's fault: keep the conversation (the next job resumes it) and pause mining and refills.
-        nb_job_finish($pdo, $jobId, false, null, $error, $sid);
+        // Not the agent's fault: keep the conversation (the next job resumes it), put the message back in the queue
+        // for when usage is back (the worker waits until then), and pause mining and refills.
+        nb_job_requeue($pdo, $jobId, "waiting: out of Claude usage ($limit)");
         nb_usage_pause($pdo, $limit);
-        nb_chat_add($pdo, 'system', "You're out of Claude usage for now (\"$limit\"), so the agent couldn't answer. "
-            . 'Your message is saved in the chat; send it again once your usage resets. Comment mining and automatic '
-            . 'refills wait until then too.', $jobId);
+        nb_chat_add($pdo, 'system', "You're out of Claude usage for now (\"$limit\"). Your message is saved and goes to "
+            . 'the agent automatically when your usage resets, along with anything else you send before then. Comment '
+            . 'mining and automatic refills wait until then too.', $jobId);
         return $summary;
     }
     if (!$ok) {

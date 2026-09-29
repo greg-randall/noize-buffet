@@ -58,6 +58,16 @@ check($code === 200, 'an IPv6 Origin matching its Host is fine');
 $pdo = nb_db();
 check(count(nb_chat_since($pdo, 0)) === 2, 'only the two allowed messages reached the chat');
 
+echo "sending while out of Claude usage\n";
+nb_usage_pause($pdo, "You've hit your session limit · resets 1:50pm (America/New_York)");
+[$code] = $call('POST', 'send', $json, json_encode(['message' => 'while paused']));
+$msgs = nb_chat_since($pdo, 0);
+$last = end($msgs);
+check($code === 200 && $last['role'] === 'system' && str_contains($last['text'], 'automatically when it resets')
+    && str_contains($last['text'], 'resets 1:50pm'), 'the chat says the message is saved and will go out after the reset');
+check((int)$pdo->query("SELECT COUNT(*) FROM jobs WHERE status = 'queued'")->fetchColumn() >= 1, 'and it is queued');
+nb_usage_clear($pdo);
+
 proc_terminate($server);
 proc_close($server);
 finish();

@@ -26,9 +26,32 @@ $interrupted = nb_jobs_recover_interrupted($pdo);
 if ($interrupted > 0) {
     fwrite(STDERR, '[' . nb_now() . "] marked $interrupted interrupted job(s) as failed\n");
 }
+$requeued = nb_jobs_requeue_usage_failed($pdo);
+if ($requeued > 0) {
+    fwrite(STDERR, '[' . nb_now() . "] $requeued message(s) that hit the usage limit are back in the queue\n");
+}
 fwrite(STDERR, '[' . nb_now() . "] job worker started (model {$config['parent_model']})\n");
 
+$waitingSince = null;
 while (true) {
+    // Out of Claude usage: run nothing (queued messages wait, no refills) until it resets, then carry on in order.
+    if ($paused = nb_usage_paused($pdo)) {
+        if ($waitingSince === null) {
+            $waitingSince = time();
+            fwrite(STDERR, '[' . nb_now() . "] out of Claude usage (\"{$paused['message']}\"); waiting until "
+                . gmdate('Y-m-d H:i', $paused['until']) . " UTC\n");
+        }
+        if ($once) {
+            $parent->stop();
+            exit(0);
+        }
+        sleep(max(1, min(30, $paused['until'] - time())));
+        continue;
+    }
+    if ($waitingSince !== null) {
+        $waitingSince = null;
+        fwrite(STDERR, '[' . nb_now() . "] usage is back; sending what's waiting\n");
+    }
     $job = nb_job_next($pdo);
     if ($job === null) {
         // Idle: top the queue up before it runs out, so the user doesn't have to ask.
