@@ -20,7 +20,12 @@
       <div class="row g-3 flex-shrink-0">
         <div class="col-md-8">
           <div id="empty-queue" class="alert alert-info d-none">No songs yet. Answer the agent in the chat, or ask it for songs.</div>
-          <div id="player-wrap" class="mb-2"><div id="player"></div><div id="brand" aria-hidden="true">noize_buffet</div></div>
+          <div id="player-wrap" class="mb-2"><div id="player"></div><div id="brand" aria-hidden="true">noize_buffet</div>
+            <div id="blocked-overlay" class="d-none">
+              <div class="blocked-why"></div>
+              <a id="blocked-play" class="btn btn-light btn-lg fw-semibold px-4 py-3" href="#" target="_blank" rel="noopener">Play on YouTube</a>
+              <div id="blocked-note" class="small text-body-secondary"></div>
+            </div></div>
           <div id="unavailable" class="alert alert-danger d-none"></div>
         </div>
 

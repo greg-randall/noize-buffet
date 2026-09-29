@@ -190,6 +190,7 @@ function loadSong(idx, autoplay, byUser) {
   $('#chat-input').attr('placeholder', `What do you think of "${s.title}"? Or ask for anything…`);
   renderSongControls();
   $('#unavailable').addClass('d-none');
+  hideEmbedBlocked();
   $('#position').text(`Song ${idx + 1} of ${state.songs.length}`);
   markCurrent(true);
   showProgress();
@@ -250,56 +251,29 @@ function saveOnLeave(movingForward) {
 function leaveAndGo(idx) {
   if (!cur()) return;
   saveOnLeave(idx > state.i);
-  closePopup();
   loadSong(idx, true, true);
 }
 
-// ---------- YouTube window, for videos YouTube won't play inside the page ----------
-// (age-restricted, or embedding turned off by the uploader). They play fine on youtube.com itself, where the
-// listener is signed in, so the song opens in a small YouTube window. Closing that window moves on to the next song.
+// ---------- videos YouTube won't play inside the page ----------
+// Age-restricted videos, and ones whose uploader turned off embedding, only play on youtube.com itself (where the
+// listener is signed in). A big button over the video opens the song there. The page can't tell when that window
+// is closed (youtube.com cuts the link to the page that opened it), so moving on is left to Next.
 
 const EMBED_BLOCKED = [101, 150];
 
-function openPopup() {
-  const s = cur();
-  if (!s) return;
-  const w = window.open('https://www.youtube.com/watch?v=' + encodeURIComponent(s.video_id), 'nb-youtube',
-    'popup,width=960,height=600');
-  if (!w) {
-    log('popup blocked by the browser; use the button');
-    $('#popup-note').text('Your browser blocked the window. Click the button, or allow popups for this page.');
-    return;
-  }
-  log('playing in a YouTube window:', s.video_id);
-  $('#popup-note').text('Playing in a YouTube window. Close it when you\'re done and the next song starts.');
-  state.popup = {win: w, videoId: s.video_id};
-  clearInterval(state.popupTimer);
-  state.popupTimer = setInterval(() => {
-    if (!state.popup || !state.popup.win.closed) return;
-    const done = state.popup.videoId;
-    state.popup = null;
-    clearInterval(state.popupTimer);
-    if (cur() && cur().video_id === done) {
-      log('YouTube window closed → next song');
-      loadSong(state.i + 1, true, false);
-    }
-  }, 1000);
-}
-
-// Moving to another song closes the window, so two songs never play at once.
-function closePopup() {
-  if (state.popup && !state.popup.win.closed) state.popup.win.close();
-  state.popup = null;
-  clearInterval(state.popupTimer);
-}
-
 function showEmbedBlocked(code) {
-  $('#unavailable').removeClass('d-none').empty().append(
-    $('<div>').text(`YouTube won't play this one inside the page (error ${code}: age-restricted, or the uploader turned off embedding).`),
-    $('<div class="d-flex gap-2 align-items-center mt-2">').append(
-      $('<button class="btn btn-sm btn-light text-nowrap">').text('Play in a YouTube window').on('click', openPopup),
-      $('<span id="popup-note" class="small">')));
+  const s = cur();
+  $('#blocked-overlay').removeClass('d-none').find('.blocked-why')
+    .text(code === 150 ? "YouTube won't play this one outside youtube.com: it's age-restricted, or the uploader turned off embedding."
+      : "The uploader turned off playing this video outside youtube.com.");
+  $('#blocked-play').attr('href', 'https://www.youtube.com/watch?v=' + encodeURIComponent(s.video_id));
+  $('#blocked-note').text('');
 }
+
+function hideEmbedBlocked() {
+  $('#blocked-overlay').addClass('d-none');
+}
+
 
 function poll() {
   if (!state.ready || !cur()) return;
@@ -332,7 +306,6 @@ function onError(e) {
   save({error: String(e.data)});
   if (EMBED_BLOCKED.includes(e.data)) {
     showEmbedBlocked(e.data);
-    openPopup(); // may be blocked (not a click); the button is there for that
     return;
   }
   $('#unavailable').removeClass('d-none').text(`Unavailable (error ${e.data}: ${why}). Use Next to move on.`);
@@ -496,6 +469,13 @@ $(function () {
   $('#debug-log').toggleClass('verbose', verbose);
   $('#debug-verbose').prop('checked', verbose).on('change', function () { state.verbose(this.checked); });
   $('#debug-clear').on('click', () => $('#debug-log').empty());
+  // A plain link opened from a click: no popup blocker, and it opens as a small window.
+  $('#blocked-play').on('click', function (e) {
+    e.preventDefault();
+    window.open(this.href, 'nb-youtube', 'popup,width=960,height=600');
+    log('opened on YouTube:', cur() ? cur().video_id : '');
+    $('#blocked-note').text('Playing on YouTube. Press Next here when you\'re done.');
+  });
   // The chat starts below the floating status badges, however many lines they wrap to.
   const overlay = document.getElementById('status-overlay');
   new ResizeObserver(() => {

@@ -68,3 +68,9 @@
   color: var(--bs-secondary-color); margin-bottom: .25rem; }
 #song-bucket { font-size: .65rem; letter-spacing: .06em; }
 #song-source a { color: inherit; }
+
+/* Over the video when YouTube won't play it here: the reason and a big button to play it on youtube.com. */
+#blocked-overlay { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 1rem; padding: 2rem; text-align: center; background: rgba(15, 15, 18, .94); }
+#blocked-overlay.d-none { display: none !important; }
+.blocked-why { font-size: 1.1rem; max-width: 34rem; }
