@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/profiles.php';
+
 const NB_RATINGS = ['top', 'yes', 'good', 'ok', 'meh', 'no'];
 const NB_BUCKETS = ['close', 'lead', 'sideways', 'wildcard', 'user'];
 const NB_JOB_KINDS = ['interview', 'chat', 'refill'];
@@ -19,7 +21,7 @@ function nb_root(): string
 
 function nb_db_path(): string
 {
-    return getenv('NB_DB') ?: nb_root() . '/data/music.sqlite';
+    return getenv('NB_DB') ?: nb_profile_dir() . '/music.sqlite';
 }
 
 function nb_now(): string
@@ -564,13 +566,20 @@ function nb_mining_enqueue(PDO $pdo, string $videoId): bool
     });
 }
 
-/** Put a video back in the mining queue, whatever its status (to mine it again); false if it was never queued. */
+/**
+ * Put a video back in the mining queue, whatever its status (to mine it again); false if it was never queued.
+ * Sets a flag so it is really read again, instead of reusing what an earlier mining (maybe for another station) extracted.
+ */
 function nb_mining_requeue(PDO $pdo, string $videoId): bool
 {
     return nb_write($pdo, function () use ($pdo, $videoId): bool {
         $st = $pdo->prepare("UPDATE mining SET status = 'queued', error = NULL, updated_at = ? WHERE video_id = ?");
         $st->execute([nb_now(), $videoId]);
-        return $st->rowCount() === 1;
+        if ($st->rowCount() !== 1) {
+            return false;
+        }
+        nb_setting_set($pdo, "mining_force_$videoId", '1');
+        return true;
     });
 }
 
@@ -592,10 +601,13 @@ function nb_mining_backfill(PDO $pdo): int
 }
 
 /** Take the oldest queued video and mark it downloading (atomic); null if none is queued. */
-function nb_mining_next(PDO $pdo): ?array
+function nb_mining_next(PDO $pdo, array $skip = []): ?array
 {
-    return nb_write($pdo, function () use ($pdo): ?array {
-        $row = $pdo->query("SELECT * FROM mining WHERE status = 'queued' ORDER BY queued_at, rowid LIMIT 1")->fetch();
+    return nb_write($pdo, function () use ($pdo, $skip): ?array {
+        $not = $skip ? ' AND video_id NOT IN (' . implode(',', array_fill(0, count($skip), '?')) . ')' : '';
+        $st = $pdo->prepare("SELECT * FROM mining WHERE status = 'queued'$not ORDER BY queued_at, rowid LIMIT 1");
+        $st->execute(array_values($skip));
+        $row = $st->fetch();
         if (!$row) {
             return null;
         }
@@ -850,6 +862,27 @@ function nb_usage_paused(PDO $pdo, ?int $now = null): ?array
     return ['until' => $until, 'message' => (string)nb_setting($pdo, 'usage_pause_message', '')];
 }
 
+/**
+ * The usage limit belongs to the Claude account, not to a station: the latest pause found in any of these databases
+ * (one per station) is copied to the others, so every station waits for the same reset.
+ */
+function nb_usage_share(array $pdos): void
+{
+    $latest = null;
+    foreach ($pdos as $pdo) {
+        $p = nb_usage_paused($pdo);
+        if ($p !== null && ($latest === null || $p['until'] > $latest['until'])) {
+            $latest = $p;
+        }
+    }
+    foreach ($latest === null ? [] : $pdos as $pdo) {
+        if ((nb_usage_paused($pdo)['until'] ?? 0) < $latest['until']) {
+            nb_setting_set($pdo, 'usage_paused_until', (string)$latest['until']);
+            nb_setting_set($pdo, 'usage_pause_message', $latest['message']);
+        }
+    }
+}
+
 function nb_usage_clear(PDO $pdo): void
 {
     nb_write($pdo, function () use ($pdo): void {
@@ -866,7 +899,7 @@ function nb_usage_clear(PDO $pdo): void
  */
 function nb_memory_files(): array
 {
-    $dir = getenv('NB_MEMORY_DIR') ?: nb_root();
+    $dir = getenv('NB_MEMORY_DIR') ?: nb_profile_dir();
     return ['brief.md' => "$dir/brief.md", 'taste.md' => "$dir/taste.md",
         'handoff.md' => getenv('NB_HANDOFF_FILE') ?: "$dir/handoff.md"];
 }

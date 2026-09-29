@@ -66,170 +66,187 @@ try {
         $waitForUsage($paused);
     }
 
-    // 1. Download the top comments.
-    nb_mining_update($pdo, $vid, ['status' => 'downloading', 'error' => null]);
-    $say("downloading up to {$config['mining_comment_cap']} top comments with yt-dlp, this can take a few minutes…");
-    $info = "$dir/$vid.info.json";
-    @unlink($info);
-    $yt = [nb_ytdlp_bin(), '--skip-download', '--write-comments', '--write-info-json',
-        '--no-write-playlist-metafiles', '--extractor-args', "youtube:comment_sort=top;max_comments={$config['mining_comment_cap']}",
-        '-o', "$dir/%(id)s.%(ext)s", "https://www.youtube.com/watch?v=$vid"];
-    for ($attempt = 1; ; $attempt++) {
-        $offset = $logSize();
-        nb_run_logged($yt, $dir, $log, NB_YTDLP_TIMEOUT_S);
-        clearstatcache(true, $info);
-        if (is_file($info) || $attempt === 2 || !str_contains((string)file_get_contents($log, false, null, $offset), '429')) {
-            break;
-        }
-        $wait = (int)(getenv('NB_YTDLP_RETRY_WAIT') ?: 120);
-        $say("YouTube is rate-limiting (429); waiting {$wait}s, then trying once more…");
-        sleep($wait);
-    }
-    if (!is_file($info)) {
-        $fail('yt-dlp got no comments: ' . $errorLine($offset));
-    }
-    $infoData = json_decode((string)file_get_contents($info), true) ?: [];
-    $comments = count($infoData['comments'] ?? []);
-    // The video's own artist by every name we know: the merge never makes it a lead under this video, and the
-    // chunks tell the child. From the song list, the title before " - ", and yt-dlp's channel and artist fields.
-    $songArtist = nb_locked($pdo, function () use ($pdo, $vid) {
-        $st = $pdo->prepare('SELECT artist FROM songs WHERE video_id = ?');
-        $st->execute([$vid]);
-        return (string)$st->fetchColumn();
-    });
-    $title = (string)($infoData['title'] ?? '');
-    $own = [];
-    foreach ([$songArtist, str_contains($title, ' - ') ? explode(' - ', $title, 2)[0] : '', $infoData['channel'] ?? '',
-        $infoData['uploader'] ?? '', $infoData['artist'] ?? '', $infoData['creator'] ?? '', ...(array)($infoData['creators'] ?? []),
-        ...(array)($infoData['artists'] ?? [])] as $name) {
-        $name = trim((string)preg_replace(['/\s*-\s*Topic$/i', '/VEVO$/'], '', trim((string)$name)));
-        $key = $name === '' ? '' : nb_name_key($name);
-        if ($key !== '' && !isset($own[$key])) {
-            $own[$key] = $name;
-        }
-    }
-    file_put_contents("$dir/own_artists.json", json_encode(array_values($own), JSON_UNESCAPED_UNICODE));
-    nb_mining_update($pdo, $vid, ['comments' => $comments]);
-    if ($comments === 0) {
-        $fail('no comments downloaded (comments may be turned off for this video)');
-    }
-    $say("$comments comments downloaded");
-
-    // 2. Flag the comments that seem to name music.
-    nb_mining_update($pdo, $vid, ['status' => 'filtering']);
-    @unlink("$dir/music_mentions_flagged.json");
-    if (nb_has_typesafe_key()) {
-        $filter = 'typesafe';
-        $say(sprintf('filtering with TypeSafe, at least %.1f min at its rate limit…', $comments / 1150));
-        $cmd = $py('find_music_mentions.py', ['--input', $info, '--env', nb_env_file(),
-            '--song-threshold', (string)$config['typesafe_song_threshold'],
-            '--artist-threshold', (string)$config['typesafe_artist_threshold'],
-            '--other-artist-threshold', (string)$config['typesafe_other_artist_threshold'],
-            '--injection-threshold', (string)$config['typesafe_injection_threshold'],
-            '--spam-threshold', (string)$config['typesafe_spam_threshold'],
-            '--min-chars', (string)$config['typesafe_min_comment_chars']]);
-    } else {
-        $filter = 'keyword';
-        $say('WARNING: no TypeSafe key in .env, so using the keyword filter: it finds only about half of the comments that name other artists, and about half of what it flags names nothing');
-        $cmd = $py('keyword_filter.py', ['--input', $info]);
-    }
-    $offset = $logSize();
-    $r = nb_run_logged($cmd, nb_root(), $log, NB_FILTER_TIMEOUT_S);
-    $flaggedFile = "$dir/music_mentions_flagged.json";
-    if (!is_file($flaggedFile)) {
-        $fail("$filter filter failed: " . $errorLine($offset));
-    }
+    // Already read in full (for another station, say)? Then don't download, filter or extract again: the names
+    // are in the folder, and reading them again would cost Claude usage for nothing. `nb.php remine` forces it.
+    $force = nb_setting($pdo, "mining_force_$vid") !== null;
     $problems = [];
-    // TypeSafe exits non-zero when some calls failed but still writes what it finished; carry on with that
-    // and record it, so one comment TypeSafe always rejects can't stop the video from ever finishing.
-    $filtered = json_decode((string)file_get_contents($flaggedFile), true);
-    $failedCalls = (int)($filtered['failed'] ?? 0);
-    if ($r['exit'] !== 0 && $failedCalls === 0) {
-        $fail("$filter filter failed: " . $errorLine($offset));
+    $cached = $force ? null : nb_video_extracted($dir, $log);
+    if ($force) {
+        nb_setting_set($pdo, "mining_force_$vid", null);
     }
-    if ($failedCalls > 0) {
-        $problems[] = "$failedCalls comments failed at TypeSafe and were not checked (mining this video again retries them)";
-    }
-    // What the filter kept away from the extraction child, counted so nothing disappears silently.
-    $notes = [];
-    if (($n = (int)($filtered['quarantined'] ?? 0)) > 0) {
-        $notes[] = "$n comments looked like instructions aimed at Claude and were not sent to it (their text is in "
-            . "comments/$vid/quarantined.jsonl)";
-    }
-    if (($n = (int)($filtered['own_artist_skipped'] ?? 0)) > 0) {
-        $notes[] = "$n only name the video's own artist, skipped";
-    }
-    if (($n = (int)($filtered['too_short_skipped'] ?? 0)) > 0) {
-        $notes[] = "$n too short to name anything, skipped";
-    }
-    if (($n = (int)($filtered['spam_skipped'] ?? 0)) > 0) {
-        $notes[] = "$n spam or self-promotion, skipped";
-    }
-    nb_mining_update($pdo, $vid, ['filter' => $filter, 'notes' => $notes ? implode('; ', $notes) : null]);
-    foreach ($notes as $note) {
-        $say($note);
-    }
-
-    // 3. Number the flagged comments and split them into chunks.
-    $r = nb_run_logged($py('prepare.py', [$dir, '--chunk-size', (string)$chunkSize]), nb_root(), $log, NB_SCRIPT_TIMEOUT_S);
-    $prep = json_decode(trim($r['out']), true);
-    if ($r['exit'] !== 0 || !is_array($prep)) {
-        $fail("prepare.py failed; see $log");
-    }
-    nb_mining_update($pdo, $vid, ['flagged' => $prep['flagged']]);
-    if ($prep['flagged'] === 0) {
-        nb_mining_update($pdo, $vid, ['status' => 'done', 'covered' => 0, 'mentions' => 0]);
-        $say("done: none of the $comments comments seem to name music");
-        exit(0);
-    }
-    $say("{$prep['flagged']} comments flagged, in " . count($prep['chunks']) . ' chunk(s)');
-
-    // 4. One confined child per chunk lists the names.
-    nb_mining_update($pdo, $vid, ['status' => 'extracting']);
-    copy(nb_root() . '/mining/child_CLAUDE.md', "$dir/CLAUDE.md");
-    $runChild = function (string $chunk) use ($pdo, $dir, $config, &$problems, $waitForUsage, $fail): void {
-        $c = nb_run_child($chunk, $dir, $config);
-        if ($c['tampered']) {
-            // It did something a confined child must never do (its files are restored): nothing it wrote is
-            // trusted, so every output in this folder is thrown away and the video fails.
-            foreach (glob("$dir/artists.chunk-*.md") ?: [] as $f) {
-                @unlink($f);
+    if ($cached !== null) {
+        $cov = $cached;
+        $info = "$dir/$vid.info.json";
+        $comments = count((json_decode((string)@file_get_contents($info), true) ?: [])['comments'] ?? []);
+        nb_mining_update($pdo, $vid, ['status' => 'extracting', 'error' => null, 'filter' => 'shared', 'comments' => $comments,
+            'flagged' => $cov['flagged'], 'notes' => 'names already extracted earlier (another station read this video); reused']);
+        $say("names already extracted earlier ({$cov['flagged']} comments); reusing them");
+    } else {
+        // 1. Download the top comments.
+        nb_mining_update($pdo, $vid, ['status' => 'downloading', 'error' => null]);
+        $say("downloading up to {$config['mining_comment_cap']} top comments with yt-dlp, this can take a few minutes…");
+        $info = "$dir/$vid.info.json";
+        @unlink($info);
+        $yt = [nb_ytdlp_bin(), '--skip-download', '--write-comments', '--write-info-json',
+            '--no-write-playlist-metafiles', '--extractor-args', "youtube:comment_sort=top;max_comments={$config['mining_comment_cap']}",
+            '-o', "$dir/%(id)s.%(ext)s", "https://www.youtube.com/watch?v=$vid"];
+        for ($attempt = 1; ; $attempt++) {
+            $offset = $logSize();
+            nb_run_logged($yt, $dir, $log, NB_YTDLP_TIMEOUT_S);
+            clearstatcache(true, $info);
+            if (is_file($info) || $attempt === 2 || !str_contains((string)file_get_contents($log, false, null, $offset), '429')) {
+                break;
             }
-            $fail("$chunk: {$c['error']}; all extraction output for this video was thrown away");
+            $wait = (int)(getenv('NB_YTDLP_RETRY_WAIT') ?: 120);
+            $say("YouTube is rate-limiting (429); waiting {$wait}s, then trying once more…");
+            sleep($wait);
         }
-        if (!$c['ok'] && ($limit = nb_usage_limit($c['error'])) !== null) {
-            nb_usage_pause($pdo, $limit);
-            $waitForUsage(nb_usage_paused($pdo) ?? ['until' => time() + 1800, 'message' => $limit]);
+        if (!is_file($info)) {
+            $fail('yt-dlp got no comments: ' . $errorLine($offset));
         }
-        if (!$c['ok']) {
-            $problems[] = "$chunk: {$c['error']}";
+        $infoData = json_decode((string)file_get_contents($info), true) ?: [];
+        $comments = count($infoData['comments'] ?? []);
+        // The video's own artist by every name we know: the merge never makes it a lead under this video, and the
+        // chunks tell the child. From the song list, the title before " - ", and yt-dlp's channel and artist fields.
+        $songArtist = nb_locked($pdo, function () use ($pdo, $vid) {
+            $st = $pdo->prepare('SELECT artist FROM songs WHERE video_id = ?');
+            $st->execute([$vid]);
+            return (string)$st->fetchColumn();
+        });
+        $title = (string)($infoData['title'] ?? '');
+        $own = [];
+        foreach ([$songArtist, str_contains($title, ' - ') ? explode(' - ', $title, 2)[0] : '', $infoData['channel'] ?? '',
+            $infoData['uploader'] ?? '', $infoData['artist'] ?? '', $infoData['creator'] ?? '', ...(array)($infoData['creators'] ?? []),
+            ...(array)($infoData['artists'] ?? [])] as $name) {
+            $name = trim((string)preg_replace(['/\s*-\s*Topic$/i', '/VEVO$/'], '', trim((string)$name)));
+            $key = $name === '' ? '' : nb_name_key($name);
+            if ($key !== '' && !isset($own[$key])) {
+                $own[$key] = $name;
+            }
         }
-        foreach ($c['denials'] as $d) {
-            $problems[] = "$chunk: blocked $d";
+        file_put_contents("$dir/own_artists.json", json_encode(array_values($own), JSON_UNESCAPED_UNICODE));
+        nb_mining_update($pdo, $vid, ['comments' => $comments]);
+        if ($comments === 0) {
+            $fail('no comments downloaded (comments may be turned off for this video)');
         }
-    };
-    foreach ($prep['chunks'] as $i => $chunk) {
-        $say(sprintf('extracting names, chunk %d of %d…', $i + 1, count($prep['chunks'])));
-        $runChild($chunk);
-    }
+        $say("$comments comments downloaded");
 
-    // 5. Every comment should have a line; re-run the missed ones once.
-    $cov = nb_coverage($dir, true, $log);
-    if ($cov['missed'] && $cov['extra_chunk']) {
-        $say(count($cov['missed']) . ' comment(s) got no line; re-running them once…');
-        $runChild($cov['extra_chunk']);
-        $cov = nb_coverage($dir, false, $log);
-    }
-    if ($cov['missed']) {
-        $problems[] = count($cov['missed']) . " of {$cov['flagged']} flagged comments still not covered after one re-run (see coverage.json)";
-    }
-    // Nothing extracted at all: fail rather than end "done" with no leads, so the video is mined again (on the
-    // worker's next start, or a day later).
-    if ($cov['flagged'] > 0 && $cov['covered'] === 0) {
-        $fail('no names extracted from any chunk: ' . implode('; ', $problems));
-    }
-    if ($cov['unknown']) {
-        $problems[] = 'the child listed comment ids that do not exist: ' . implode(', ', $cov['unknown']);
+        // 2. Flag the comments that seem to name music.
+        nb_mining_update($pdo, $vid, ['status' => 'filtering']);
+        @unlink("$dir/music_mentions_flagged.json");
+        if (nb_has_typesafe_key()) {
+            $filter = 'typesafe';
+            $say(sprintf('filtering with TypeSafe, at least %.1f min at its rate limit…', $comments / 1150));
+            $cmd = $py('find_music_mentions.py', ['--input', $info, '--env', nb_env_file(),
+                '--song-threshold', (string)$config['typesafe_song_threshold'],
+                '--artist-threshold', (string)$config['typesafe_artist_threshold'],
+                '--other-artist-threshold', (string)$config['typesafe_other_artist_threshold'],
+                '--injection-threshold', (string)$config['typesafe_injection_threshold'],
+                '--spam-threshold', (string)$config['typesafe_spam_threshold'],
+                '--min-chars', (string)$config['typesafe_min_comment_chars']]);
+        } else {
+            $filter = 'keyword';
+            $say('WARNING: no TypeSafe key in .env, so using the keyword filter: it finds only about half of the comments that name other artists, and about half of what it flags names nothing');
+            $cmd = $py('keyword_filter.py', ['--input', $info]);
+        }
+        $offset = $logSize();
+        $r = nb_run_logged($cmd, nb_root(), $log, NB_FILTER_TIMEOUT_S);
+        $flaggedFile = "$dir/music_mentions_flagged.json";
+        if (!is_file($flaggedFile)) {
+            $fail("$filter filter failed: " . $errorLine($offset));
+        }
+        $problems = [];
+        // TypeSafe exits non-zero when some calls failed but still writes what it finished; carry on with that
+        // and record it, so one comment TypeSafe always rejects can't stop the video from ever finishing.
+        $filtered = json_decode((string)file_get_contents($flaggedFile), true);
+        $failedCalls = (int)($filtered['failed'] ?? 0);
+        if ($r['exit'] !== 0 && $failedCalls === 0) {
+            $fail("$filter filter failed: " . $errorLine($offset));
+        }
+        if ($failedCalls > 0) {
+            $problems[] = "$failedCalls comments failed at TypeSafe and were not checked (mining this video again retries them)";
+        }
+        // What the filter kept away from the extraction child, counted so nothing disappears silently.
+        $notes = [];
+        if (($n = (int)($filtered['quarantined'] ?? 0)) > 0) {
+            $notes[] = "$n comments looked like instructions aimed at Claude and were not sent to it (their text is in "
+                . "comments/$vid/quarantined.jsonl)";
+        }
+        if (($n = (int)($filtered['own_artist_skipped'] ?? 0)) > 0) {
+            $notes[] = "$n only name the video's own artist, skipped";
+        }
+        if (($n = (int)($filtered['too_short_skipped'] ?? 0)) > 0) {
+            $notes[] = "$n too short to name anything, skipped";
+        }
+        if (($n = (int)($filtered['spam_skipped'] ?? 0)) > 0) {
+            $notes[] = "$n spam or self-promotion, skipped";
+        }
+        nb_mining_update($pdo, $vid, ['filter' => $filter, 'notes' => $notes ? implode('; ', $notes) : null]);
+        foreach ($notes as $note) {
+            $say($note);
+        }
+
+        // 3. Number the flagged comments and split them into chunks.
+        $r = nb_run_logged($py('prepare.py', [$dir, '--chunk-size', (string)$chunkSize]), nb_root(), $log, NB_SCRIPT_TIMEOUT_S);
+        $prep = json_decode(trim($r['out']), true);
+        if ($r['exit'] !== 0 || !is_array($prep)) {
+            $fail("prepare.py failed; see $log");
+        }
+        nb_mining_update($pdo, $vid, ['flagged' => $prep['flagged']]);
+        if ($prep['flagged'] === 0) {
+            nb_mining_update($pdo, $vid, ['status' => 'done', 'covered' => 0, 'mentions' => 0]);
+            $say("done: none of the $comments comments seem to name music");
+            exit(0);
+        }
+        $say("{$prep['flagged']} comments flagged, in " . count($prep['chunks']) . ' chunk(s)');
+
+        // 4. One confined child per chunk lists the names.
+        nb_mining_update($pdo, $vid, ['status' => 'extracting']);
+        copy(nb_root() . '/mining/child_CLAUDE.md', "$dir/CLAUDE.md");
+        $runChild = function (string $chunk) use ($pdo, $dir, $config, &$problems, $waitForUsage, $fail): void {
+            $c = nb_run_child($chunk, $dir, $config);
+            if ($c['tampered']) {
+                // It did something a confined child must never do (its files are restored): nothing it wrote is
+                // trusted, so every output in this folder is thrown away and the video fails.
+                foreach (glob("$dir/artists.chunk-*.md") ?: [] as $f) {
+                    @unlink($f);
+                }
+                $fail("$chunk: {$c['error']}; all extraction output for this video was thrown away");
+            }
+            if (!$c['ok'] && ($limit = nb_usage_limit($c['error'])) !== null) {
+                nb_usage_pause($pdo, $limit);
+                $waitForUsage(nb_usage_paused($pdo) ?? ['until' => time() + 1800, 'message' => $limit]);
+            }
+            if (!$c['ok']) {
+                $problems[] = "$chunk: {$c['error']}";
+            }
+            foreach ($c['denials'] as $d) {
+                $problems[] = "$chunk: blocked $d";
+            }
+        };
+        foreach ($prep['chunks'] as $i => $chunk) {
+            $say(sprintf('extracting names, chunk %d of %d…', $i + 1, count($prep['chunks'])));
+            $runChild($chunk);
+        }
+
+        // 5. Every comment should have a line; re-run the missed ones once.
+        $cov = nb_coverage($dir, true, $log);
+        if ($cov['missed'] && $cov['extra_chunk']) {
+            $say(count($cov['missed']) . ' comment(s) got no line; re-running them once…');
+            $runChild($cov['extra_chunk']);
+            $cov = nb_coverage($dir, false, $log);
+        }
+        if ($cov['missed']) {
+            $problems[] = count($cov['missed']) . " of {$cov['flagged']} flagged comments still not covered after one re-run (see coverage.json)";
+        }
+        // Nothing extracted at all: fail rather than end "done" with no leads, so the video is mined again (on the
+        // worker's next start, or a day later).
+        if ($cov['flagged'] > 0 && $cov['covered'] === 0) {
+            $fail('no names extracted from any chunk: ' . implode('; ', $problems));
+        }
+        if ($cov['unknown']) {
+            $problems[] = 'the child listed comment ids that do not exist: ' . implode(', ', $cov['unknown']);
+        }
     }
 
     // 6. Merge every mined video into the leads table. One merge at a time: workers run in parallel, and an older

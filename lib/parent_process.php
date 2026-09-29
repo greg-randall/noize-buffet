@@ -32,12 +32,12 @@ final class NbParentProcess
         return $this->proc !== null ? proc_get_status($this->proc)['pid'] : null;
     }
 
-    /** Start the process in $cwd; stderr is appended to $stderrLog. */
-    public function start(array $cmd, string $cwd, string $stderrLog): void
+    /** Start the process in $cwd; stderr is appended to $stderrLog. $env is added to this process's environment. */
+    public function start(array $cmd, string $cwd, string $stderrLog, array $env = []): void
     {
         $this->stop();
         $spec = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['file', $stderrLog, 'a']];
-        $proc = proc_open($cmd, $spec, $pipes, $cwd);
+        $proc = proc_open($cmd, $spec, $pipes, $cwd, $env === [] ? null : array_merge(getenv(), $env));
         if (!is_resource($proc)) {
             throw new RuntimeException('could not start ' . $cmd[0]);
         }

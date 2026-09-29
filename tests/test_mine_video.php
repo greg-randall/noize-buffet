@@ -241,6 +241,29 @@ check(nb_mining_requeue($pdo, 'V0000000014') && $row('V0000000014')['status'] ==
 check($code === 0 && $row('V0000000014')['status'] === 'done', 'once the folder is free it mines normally');
 check(!nb_mining_requeue($pdo, 'VNEVERMINED'), "a video that was never queued can't be requeued");
 
+echo "a second station reuses what the first one extracted\n";
+$origDb = (string)getenv('NB_DB');
+$children = $childCalls();
+$downloads = fn() => count(array_filter($calls(), fn($c) => in_array('--write-comments', $c['args'], true)));
+$downloadsBefore = $downloads();
+$db2 = tmp_dir() . '/test_mine_video_station2.sqlite';
+@unlink($db2);
+@unlink("$db2.lock");
+putenv("NB_DB=$db2");
+$pdo2 = nb_db($db2);
+nb_add_batch($pdo2, [['video_id' => 'V0000000001', 'title' => 'Test Song', 'artist' => 'Test Artist', 'bucket' => 'user']], 'b', null);
+[$code, $out] = $mine('V0000000001');
+$r2 = array_values(array_filter(nb_mining_list($pdo2), fn($m) => $m['video_id'] === 'V0000000001'))[0] ?? [];
+check($code === 0 && ($r2['status'] ?? '') === 'done' && $r2['error'] === null, 'the video is done for the second station' . ($code ? " (exit $code: $out)" : ''));
+check($childCalls() === $children && $downloads() === $downloadsBefore, 'without running Claude or downloading again');
+check(str_contains((string)$r2['notes'], 'reused') && $r2['filter'] === 'shared' && (int)$r2['covered'] === 3 && (int)$r2['comments'] === 4,
+    'and the row says so, with the same counts');
+check(in_array('burial', array_column(nb_leads($pdo2), 'name_key'), true), "the second station gets its own leads from the same names");
+nb_mining_requeue($pdo2, 'V0000000001'); // nb.php remine
+[$code] = $mine('V0000000001');
+check($code === 0 && $childCalls() > $children && $downloads() > $downloadsBefore, 'remine reads it again, whatever is cached');
+putenv("NB_DB=$origDb");
+
 echo "prework: YouTube links for leads\n";
 $searches = fn() => array_values(array_filter($calls(), fn($c) => str_starts_with((string)end($c['args']), 'ytsearch')));
 $yt = nb_lead_youtube_all($pdo);

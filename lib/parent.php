@@ -22,9 +22,12 @@ function nb_handoff_path(): string
 function nb_parent_prompt(array $job, bool $newSession): string
 {
     $intro = $newSession
-        ? "You are the noize-buffet parent agent. First read CLAUDE.md in the current directory and follow it "
-          . "for this whole conversation. Then read brief.md and taste.md if they exist, and handoff.md if it "
-          . "exists: it's the note you left yourself when your previous conversation ended.\n\n"
+        ? "You are the noize-buffet parent agent, running the station \"" . nb_profile_name(nb_profile()) . "\". First read "
+          . "CLAUDE.md in the current directory and follow it for this whole conversation. This station's files are in "
+          . nb_profile_dir_for_agent() . "/: read brief.md and taste.md there if they exist, and handoff.md if it exists "
+          . "(it's the note you left yourself when your previous conversation ended). Only read or write files in that "
+          . "folder: other stations are other listening profiles, and their files are off limits. Write batch files to "
+          . nb_profile_dir_for_agent() . "/pending-batch.json.\n\n"
         : '';
     $sent = strtotime((string)($job['created_at'] ?? '')) ?: time();
     $intro .= sprintf("(Sent at %s, unix %d.)\n\n", gmdate('Y-m-d H:i', $sent) . ' UTC', $sent);
@@ -66,7 +69,26 @@ function nb_parent_settings(): array
     foreach (NB_INSTRUCTION_FILES as $f) {
         $settings['claudeMdExcludes'][] = "$commentsDir/**/$f";
     }
+    // The other stations' folders are off limits (belt and braces: the prompt says so too).
+    foreach (nb_profiles() as $p) {
+        if ($p['slug'] !== nb_profile()) {
+            $real = realpath(nb_profile_dir($p['slug'])) ?: nb_profile_dir($p['slug']);
+            foreach (['Read', 'Edit'] as $tool) {
+                $settings['permissions']['deny'][] = "$tool(/" . '/' . ltrim($real, '/') . '/**)';
+            }
+        }
+    }
     return $settings;
+}
+
+/**
+ * Start the agent for the current station: it runs with NB_PROFILE set, so `php bin/nb.php` acts on this station's
+ * database and nowhere else, whatever it tries.
+ */
+function nb_parent_start(NbParentProcess $parent, ?string $sid, array $config): void
+{
+    $parent->start(nb_parent_command($sid, $config), nb_root(), dirname(nb_db_path()) . '/parent-stderr.log',
+        ['NB_PROFILE' => nb_profile()]);
 }
 
 /** The command for a long-lived parent process that reads messages as JSON lines on stdin (see NbParentProcess). */
@@ -185,10 +207,10 @@ function nb_write_handoff(NbParentProcess $parent, string $sid, array $config): 
     $error = null;
     try {
         if (!$parent->running() || $parent->sessionId !== $sid) {
-            $parent->start(nb_parent_command($sid, $config), nb_root(), dirname(nb_db_path()) . '/parent-stderr.log');
+            nb_parent_start($parent, $sid, $config);
         }
         $r = $parent->send("Your conversation is about to start over (it does every {$config['session_rotate_turns']} "
-            . 'messages, to stay fast). Now write handoff.md in the current directory, replacing any old one, for your '
+            . 'messages, to stay fast). Now write ' . nb_profile_dir_for_agent() . '/handoff.md, replacing any old one, for your '
             . 'next conversation: what you and the user have been talking about lately, anything you promised or were '
             . 'in the middle of, open questions, and anything they said that belongs in taste.md or brief.md but '
             . "isn't there yet (add it there too). Under 300 words. Then reply with one line.",
@@ -263,7 +285,7 @@ function nb_run_parent_job(PDO $pdo, array $job, array $config, NbParentProcess 
     $r = ['result' => null, 'events' => [], 'error' => null];
     try {
         if (!$parent->running()) {
-            $parent->start(nb_parent_command($sid, $config), nb_root(), dirname(nb_db_path()) . '/parent-stderr.log');
+            nb_parent_start($parent, $sid, $config);
             $newProcess = true;
             // A resumed session reports the whole conversation's cost so far.
             $prevCost = $sid !== null ? (float)nb_setting($pdo, 'parent_session_cost', '0') : 0.0;

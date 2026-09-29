@@ -7,10 +7,11 @@ declare(strict_types=1);
 //   FAKE_FAIL: error result "boom"   FAKE_DENY: a permission denial   FAKE_COST=<x>: session total becomes x
 //   FAKE_EXIT: exit without a result   FAKE_HANG: go quiet for 5 seconds
 //   FAKE_LIMIT: error result saying the weekly usage limit is reached (resets 2pm New York time)
-// Asked for the handoff note ("write handoff.md"), it writes one to NB_HANDOFF_FILE naming its session, unless
+// Asked for the handoff note ("Now write <folder>/handoff.md"), it writes one to NB_HANDOFF_FILE naming its session, unless
 // NB_FAKE_HANDOFF_FAIL is set (then it returns an error result and writes nothing).
 $args = array_slice($argv, 1);
 file_put_contents((string)getenv('NB_FAKE_ARGS'), json_encode($args, JSON_UNESCAPED_SLASHES) . "\n", FILE_APPEND);
+file_put_contents((string)(getenv('NB_FAKE_ENV') ?: '/dev/null'), getenv('NB_PROFILE') . "\n", FILE_APPEND);
 $resume = array_search('--resume', $args, true);
 $sid = $resume !== false ? $args[$resume + 1] : 'sess-' . getmypid();
 $total = 0.0;
@@ -44,7 +45,7 @@ while (($line = fgets(STDIN)) !== false) {
     if (str_contains($text, 'FAKE_LIMIT')) {
         $result = ['is_error' => true, 'result' => "You've hit your weekly limit · resets 2pm (America/New_York)"] + $result;
     }
-    if (str_contains($text, 'write handoff.md')) {
+    if (preg_match('#Now write \S*handoff\.md#', $text)) {
         if (getenv('NB_FAKE_HANDOFF_FAIL')) {
             $result = ['is_error' => true, 'result' => 'could not write the handoff'] + $result;
         } else {

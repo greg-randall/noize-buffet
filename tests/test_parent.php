@@ -110,7 +110,7 @@ $oldSid = nb_setting($pdo, 'parent_session_id');
 $before = count($inputs());
 $s = $run(['message' => 'x']); // parent_turns is 3 now, which is session_rotate_turns
 $sent = array_slice($inputs(), $before);
-check(count($sent) === 2 && str_contains($sent[0], 'write handoff.md') && str_contains($sent[0], 'about to start over'),
+check(count($sent) === 2 && str_contains($sent[0], '/handoff.md') && str_contains($sent[0], 'about to start over'),
     'first the old conversation is asked to write handoff.md');
 check(is_file($handoffFile) && trim((string)file_get_contents($handoffFile)) === "handoff from $oldSid",
     'and writes it (the old session wrote it)');
@@ -182,6 +182,29 @@ $dbg = json_decode((string)file_get_contents(tmp_dir() . "/jobs/$fid.json"), tru
 check($dbg['ok'] === false && str_contains(json_encode($dbg['events']), 'boom'), 'debug file has the events');
 $s = $run(['message' => 'after the error']);
 check($s['ok'] && count($spawns()) === $before + 1 && !in_array('--resume', $args(), true), 'next job starts a fresh process');
+
+echo "one agent per station\n";
+$envFile = tmp_dir() . '/fake_env.txt';
+@unlink($envFile);
+putenv("NB_FAKE_ENV=$envFile");
+$parent->stop();
+$savedSid = nb_setting($pdo, 'parent_session_id');
+$savedTurns = nb_setting($pdo, 'parent_turns');
+nb_setting_set($pdo, 'parent_session_id', null); // a station of its own has no conversation yet (here they share one database)
+nb_profile('jazz');
+$before = count($spawns());
+$s = $run(['message' => 'a jazz question']);
+check($s['ok'] && count($spawns()) === $before + 1, 'a new agent process starts for the station');
+check(trim((string)file_get_contents($envFile)) === 'jazz', 'and it runs with NB_PROFILE set to that station');
+$in = array_map('json_decode', file($inputsFile, FILE_IGNORE_NEW_LINES));
+$firstPrompt = (string)end($in);
+check(str_contains($firstPrompt, 'the station "jazz"') && str_contains($firstPrompt, '/jazz/')
+    && str_contains($firstPrompt, 'pending-batch.json') && str_contains($firstPrompt, 'off limits'),
+    "the intro names the station and its folder, and puts the others off limits");
+$parent->stop();
+nb_profile('main');
+nb_setting_set($pdo, 'parent_session_id', $savedSid);
+nb_setting_set($pdo, 'parent_turns', $savedTurns);
 
 echo "out of Claude usage\n";
 $run(['message' => 'before the limit']);

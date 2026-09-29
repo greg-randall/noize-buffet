@@ -655,3 +655,21 @@ function nb_lookup_leads(PDO $pdo, array $config, string $logFile): array
     }
     return $done;
 }
+
+/**
+ * The coverage of a video folder that has already been fully read (every flagged comment has its line of names), or
+ * null. Mining for another station leaves such a folder behind, and reusing it means the names aren't extracted, and
+ * paid for, twice.
+ */
+function nb_video_extracted(string $dir, string $logFile): ?array
+{
+    if (!is_file("$dir/comment_index.json") || !is_file("$dir/own_artists.json") || !glob("$dir/artists.chunk-*.md")) {
+        return null;
+    }
+    try {
+        $cov = nb_coverage($dir, false, $logFile);
+    } catch (Throwable) {
+        return null;
+    }
+    return ($cov['flagged'] ?? 0) > 0 && ($cov['missed'] ?? []) === [] && ($cov['unknown'] ?? []) === [] ? $cov : null;
+}
