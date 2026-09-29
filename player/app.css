@@ -6,7 +6,7 @@
   --nb-vermilion: #c4432b;
   --nb-vermilion-hover: #d6583f;
   --nb-oxblood: #5c1b25;
-  --nb-terracotta: #c27250;
+  --nb-terracotta: #d98d6b;
   --nb-brand-orange: #f2601c;
   /* text is never pure white or black */
   --nb-ink-light: #f0ece7;
@@ -18,10 +18,10 @@
   --bs-primary-border-subtle: #5a2c33;
   --bs-primary-text-emphasis: #e7a68f;
   --bs-link-color: var(--nb-terracotta);
-  --bs-link-color-rgb: 194, 114, 80;
-  --bs-link-hover-color: #dc9474;
-  --bs-link-hover-color-rgb: 220, 148, 116;
-  --bs-focus-ring-color: rgba(196, 67, 43, .35);
+  --bs-link-color-rgb: 217, 141, 107;
+  --bs-link-hover-color: #e8a98d;
+  --bs-link-hover-color-rgb: 232, 169, 141;
+  --bs-focus-ring-color: #e8a98d;
   /* Warm greys in place of Bootstrap's cool blue-greys: the lightest touch of warmth, not enough to look brown. */
   --bs-body-bg: #262523;
   --bs-body-bg-rgb: 38, 37, 35;
@@ -33,9 +33,10 @@
   --bs-tertiary-bg: #2e2d2b;
   --bs-tertiary-bg-rgb: 46, 45, 43;
   --bs-secondary-color: rgba(227, 225, 222, .72);
-  --bs-tertiary-color: rgba(227, 225, 222, .5);
+  --bs-tertiary-color: rgba(227, 225, 222, .6);
   --bs-border-color: #4e4c49;
-  --bs-secondary-rgb: 117, 114, 110;
+  --bs-secondary-rgb: 102, 99, 95;
+  --bs-danger-rgb: 176, 42, 55;
   --bs-secondary-border-subtle: #57544f;
   --bs-light-rgb: 243, 241, 238;
 }
@@ -51,12 +52,12 @@
 }
 .btn-outline-secondary {
   --bs-btn-color: #a19e99; --bs-btn-border-color: #75726e;
-  --bs-btn-hover-bg: #75726e; --bs-btn-hover-border-color: #75726e; --bs-btn-hover-color: var(--nb-ink-light);
-  --bs-btn-active-bg: #75726e; --bs-btn-active-border-color: #75726e; --bs-btn-active-color: var(--nb-ink-light);
+  --bs-btn-hover-bg: #66635f; --bs-btn-hover-border-color: #66635f; --bs-btn-hover-color: var(--nb-ink-light);
+  --bs-btn-active-bg: #66635f; --bs-btn-active-border-color: #66635f; --bs-btn-active-color: var(--nb-ink-light);
 }
 /* The song playing now: an oxblood row in the playlist. */
 #queue-list tr.table-active { --bs-table-bg-state: #312829; --bs-table-color-state: var(--nb-ink-light); }
-#queue-list tr.table-active > td:first-child { box-shadow: inset 3px 0 0 #6b2a34; }
+#queue-list tr.table-active > td:first-child { box-shadow: inset 3px 0 0 #a0666e; }
 /* the playlist's Why column: lighter than Bootstrap's muted grey, which was hard to read */
 #queue-list td.why { color: rgba(227, 225, 222, .74); }
 .btn-primary {
@@ -70,12 +71,15 @@
 .text-bg-secondary, .text-bg-danger, .text-bg-success, .text-bg-primary, .text-bg-dark { color: var(--nb-ink-light) !important; }
 .text-bg-warning, .text-bg-info, .text-bg-light { color: var(--nb-ink-dark) !important; }
 /* The chat's message box and Send button match the chat bubbles: barely-there oxblood, not the orange. */
-#chat-input:focus { border-color: #6b2a34; box-shadow: 0 0 0 .2rem rgba(107, 42, 52, .3); }
-.form-control:focus { border-color: var(--nb-terracotta); box-shadow: 0 0 0 .2rem var(--bs-focus-ring-color); }
+
+/* WCAG 2.1 AA: control borders 3:1 against the page (1.4.11), and a focus ring that shows (2.4.7) */
+.form-control, .form-select, #chat-log { border-color: #7a7772; }
+.form-control:focus, .form-select:focus { border-color: #e8a98d; box-shadow: none; }
+:focus-visible { outline: 2px solid #e8a98d; outline-offset: 2px; }
 #chat-send {
-  --bs-btn-color: var(--nb-ink-light); --bs-btn-bg: #3a2b2d; --bs-btn-border-color: #5a2c33;
-  --bs-btn-hover-color: var(--nb-ink-light); --bs-btn-hover-bg: #4a3033; --bs-btn-hover-border-color: #6b2a34;
-  --bs-btn-active-color: var(--nb-ink-light); --bs-btn-active-bg: #54343a; --bs-btn-active-border-color: #6b2a34;
+  --bs-btn-color: var(--nb-ink-light); --bs-btn-bg: #3a2b2d; --bs-btn-border-color: #a0666e;
+  --bs-btn-hover-color: var(--nb-ink-light); --bs-btn-hover-bg: #4a3033; --bs-btn-hover-border-color: #b8767e;
+  --bs-btn-active-color: var(--nb-ink-light); --bs-btn-active-bg: #54343a; --bs-btn-active-border-color: #b8767e;
 }
 #agent-status { background: var(--nb-terracotta); color: #1c0f0b; }
 
@@ -160,7 +164,7 @@
 .rate[data-rating=good] { --rate: #cfa55c; } /* ochre */
 .rate[data-rating=ok] { --rate: #9a9793; }   /* warm grey */
 .rate[data-rating=meh] { --rate: #c77a55; }  /* terracotta */
-.rate[data-rating=no] { --rate: #bf4a4a; }   /* brick red */
+.rate[data-rating=no] { --rate: #e0706c; }   /* brick red */
 .rate {
   --bs-btn-color: var(--rate); --bs-btn-border-color: var(--rate);
   --bs-btn-hover-color: var(--nb-ink-dark); --bs-btn-hover-bg: var(--rate); --bs-btn-hover-border-color: var(--rate);
@@ -170,6 +174,6 @@
 /* "new to you" and "off-brief": small pills, outlined when off, filled when on ("knew it" fills in grey). */
 .tag-toggle { font-size: .75rem; font-weight: 600; line-height: 1; padding: .3em .7em; border-radius: 999px;
   border: 1px solid var(--nb-terracotta); color: var(--nb-terracotta); background: transparent; cursor: pointer; }
-.tag-toggle:hover { border-color: #dc9474; color: #dc9474; }
+.tag-toggle:hover { border-color: #e8a98d; color: #e8a98d; }
 .tag-toggle.on { background: var(--nb-terracotta); color: var(--nb-ink-dark); }
-.tag-toggle.knew { border-color: #75726e; background: #75726e; color: var(--nb-ink-light); }
+.tag-toggle.knew { border-color: #66635f; background: #66635f; color: var(--nb-ink-light); }
