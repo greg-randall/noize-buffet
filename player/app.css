@@ -7,10 +7,15 @@
   --nb-vermilion-hover: #d6583f;
   --nb-oxblood: #5c1b25;
   --nb-terracotta: #c27250;
+  --nb-brand-orange: #f2601c;
+  /* text is never pure white or black */
+  --nb-ink-light: #f0ece7;
+  --nb-ink-dark: #22201e;
   --bs-primary: var(--nb-vermilion);
   --bs-primary-rgb: 196, 67, 43;
-  --bs-primary-bg-subtle: #3a1318;
-  --bs-primary-border-subtle: #6e2530;
+  /* your chat bubbles: barely-there oxblood, mostly in the edge */
+  --bs-primary-bg-subtle: #2e2627;
+  --bs-primary-border-subtle: #5a2c33;
   --bs-primary-text-emphasis: #e7a68f;
   --bs-link-color: var(--nb-terracotta);
   --bs-link-color-rgb: 194, 114, 80;
@@ -22,7 +27,7 @@
   --bs-body-bg-rgb: 38, 37, 35;
   --bs-body-color: #e3e1de;
   --bs-body-color-rgb: 227, 225, 222;
-  --bs-emphasis-color: #faf9f7;
+  --bs-emphasis-color: var(--nb-ink-light);
   --bs-secondary-bg: #363432;
   --bs-secondary-bg-rgb: 54, 52, 50;
   --bs-tertiary-bg: #2e2d2b;
@@ -35,29 +40,43 @@
   --bs-light-rgb: 243, 241, 238;
 }
 .btn-light {
-  --bs-btn-bg: #f3f1ee; --bs-btn-border-color: #f3f1ee; --bs-btn-color: #262523;
+  --bs-btn-bg: #f3f1ee; --bs-btn-border-color: #f3f1ee; --bs-btn-color: var(--nb-ink-dark);
   --bs-btn-hover-bg: #e5e2de; --bs-btn-hover-border-color: #e5e2de;
   --bs-btn-active-bg: #d8d5d0; --bs-btn-active-border-color: #d8d5d0;
 }
 .btn-outline-light {
   --bs-btn-color: #f3f1ee; --bs-btn-border-color: #f3f1ee;
-  --bs-btn-hover-bg: #f3f1ee; --bs-btn-hover-border-color: #f3f1ee; --bs-btn-hover-color: #262523;
-  --bs-btn-active-bg: #f3f1ee; --bs-btn-active-color: #262523;
+  --bs-btn-hover-bg: #f3f1ee; --bs-btn-hover-border-color: #f3f1ee; --bs-btn-hover-color: var(--nb-ink-dark);
+  --bs-btn-active-bg: #f3f1ee; --bs-btn-active-color: var(--nb-ink-dark);
 }
 .btn-outline-secondary {
   --bs-btn-color: #a19e99; --bs-btn-border-color: #75726e;
-  --bs-btn-hover-bg: #75726e; --bs-btn-hover-border-color: #75726e; --bs-btn-hover-color: #faf9f7;
-  --bs-btn-active-bg: #75726e; --bs-btn-active-border-color: #75726e; --bs-btn-active-color: #faf9f7;
+  --bs-btn-hover-bg: #75726e; --bs-btn-hover-border-color: #75726e; --bs-btn-hover-color: var(--nb-ink-light);
+  --bs-btn-active-bg: #75726e; --bs-btn-active-border-color: #75726e; --bs-btn-active-color: var(--nb-ink-light);
 }
 /* The song playing now: an oxblood row in the playlist. */
-#queue-list tr.table-active { --bs-table-bg-state: #4b1a22; --bs-table-color-state: #faf9f7; }
+#queue-list tr.table-active { --bs-table-bg-state: #312829; --bs-table-color-state: var(--nb-ink-light); }
+#queue-list tr.table-active > td:first-child { box-shadow: inset 3px 0 0 #6b2a34; }
+/* the playlist's Why column: lighter than Bootstrap's muted grey, which was hard to read */
+#queue-list td.why { color: rgba(227, 225, 222, .74); }
 .btn-primary {
   --bs-btn-bg: var(--nb-vermilion); --bs-btn-border-color: var(--nb-vermilion);
   --bs-btn-hover-bg: var(--nb-vermilion-hover); --bs-btn-hover-border-color: var(--nb-vermilion-hover);
   --bs-btn-active-bg: #a83722; --bs-btn-active-border-color: #a83722;
   --bs-btn-disabled-bg: var(--nb-vermilion); --bs-btn-disabled-border-color: var(--nb-vermilion);
+  --bs-btn-color: var(--nb-ink-light); --bs-btn-hover-color: var(--nb-ink-light); --bs-btn-active-color: var(--nb-ink-light);
 }
+/* Bootstrap's badges write pure white (or black) text; use the off-white and off-black instead. */
+.text-bg-secondary, .text-bg-danger, .text-bg-success, .text-bg-primary, .text-bg-dark { color: var(--nb-ink-light) !important; }
+.text-bg-warning, .text-bg-info, .text-bg-light { color: var(--nb-ink-dark) !important; }
+/* The chat's message box and Send button match the chat bubbles: barely-there oxblood, not the orange. */
+#chat-input:focus { border-color: #6b2a34; box-shadow: 0 0 0 .2rem rgba(107, 42, 52, .3); }
 .form-control:focus { border-color: var(--nb-terracotta); box-shadow: 0 0 0 .2rem var(--bs-focus-ring-color); }
+#chat-send {
+  --bs-btn-color: var(--nb-ink-light); --bs-btn-bg: #3a2b2d; --bs-btn-border-color: #5a2c33;
+  --bs-btn-hover-color: var(--nb-ink-light); --bs-btn-hover-bg: #4a3033; --bs-btn-hover-border-color: #6b2a34;
+  --bs-btn-active-color: var(--nb-ink-light); --bs-btn-active-bg: #54343a; --bs-btn-active-border-color: #6b2a34;
+}
 #agent-status { background: var(--nb-terracotta); color: #1c0f0b; }
 
 /* App layout on wide screens: the page never scrolls; the playlist, mining table,
@@ -92,7 +111,7 @@
    go through to the video. */
 #brand { position: absolute; top: -16px; left: -12px; z-index: 1000000; pointer-events: none; user-select: none;
   font-family: 'Geo', sans-serif; font-size: 4rem; line-height: .75; text-transform: uppercase; letter-spacing: -.09em;
-  color: var(--nb-vermilion-hover); opacity: .9;
+  color: var(--nb-brand-orange); opacity: .9;
   text-shadow:
     /* tight: a heavy dark edge all round, diagonals included */
     -3px 0 4px #000, 3px 0 4px #000, 0 -3px 4px #000, 0 3px 4px #000,
@@ -144,13 +163,13 @@
 .rate[data-rating=no] { --rate: #bf4a4a; }   /* brick red */
 .rate {
   --bs-btn-color: var(--rate); --bs-btn-border-color: var(--rate);
-  --bs-btn-hover-color: #1d1c1b; --bs-btn-hover-bg: var(--rate); --bs-btn-hover-border-color: var(--rate);
-  --bs-btn-active-color: #1d1c1b; --bs-btn-active-bg: var(--rate); --bs-btn-active-border-color: var(--rate);
+  --bs-btn-hover-color: var(--nb-ink-dark); --bs-btn-hover-bg: var(--rate); --bs-btn-hover-border-color: var(--rate);
+  --bs-btn-active-color: var(--nb-ink-dark); --bs-btn-active-bg: var(--rate); --bs-btn-active-border-color: var(--rate);
 }
 
 /* "new to you" and "off-brief": small pills, outlined when off, filled when on ("knew it" fills in grey). */
 .tag-toggle { font-size: .75rem; font-weight: 600; line-height: 1; padding: .3em .7em; border-radius: 999px;
   border: 1px solid var(--nb-terracotta); color: var(--nb-terracotta); background: transparent; cursor: pointer; }
 .tag-toggle:hover { border-color: #dc9474; color: #dc9474; }
-.tag-toggle.on { background: var(--nb-terracotta); color: #1d1c1b; }
-.tag-toggle.knew { border-color: #75726e; background: #75726e; color: #faf9f7; }
+.tag-toggle.on { background: var(--nb-terracotta); color: var(--nb-ink-dark); }
+.tag-toggle.knew { border-color: #75726e; background: #75726e; color: var(--nb-ink-light); }

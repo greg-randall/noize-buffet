@@ -121,7 +121,7 @@
       </div>
       <form id="chat-form" class="d-flex gap-2 flex-shrink-0">
         <textarea id="chat-input" class="form-control" rows="4" placeholder="What do you think of this song? Or ask for anything…"></textarea>
-        <button class="btn btn-primary" type="submit">Send</button>
+        <button id="chat-send" class="btn" type="submit">Send</button>
       </form>
     </div>
   </div>
