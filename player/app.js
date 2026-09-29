@@ -250,7 +250,55 @@ function saveOnLeave(movingForward) {
 function leaveAndGo(idx) {
   if (!cur()) return;
   saveOnLeave(idx > state.i);
+  closePopup();
   loadSong(idx, true, true);
+}
+
+// ---------- YouTube window, for videos YouTube won't play inside the page ----------
+// (age-restricted, or embedding turned off by the uploader). They play fine on youtube.com itself, where the
+// listener is signed in, so the song opens in a small YouTube window. Closing that window moves on to the next song.
+
+const EMBED_BLOCKED = [101, 150];
+
+function openPopup() {
+  const s = cur();
+  if (!s) return;
+  const w = window.open('https://www.youtube.com/watch?v=' + encodeURIComponent(s.video_id), 'nb-youtube',
+    'popup,width=960,height=600');
+  if (!w) {
+    log('popup blocked by the browser; use the button');
+    $('#popup-note').text('Your browser blocked the window. Click the button, or allow popups for this page.');
+    return;
+  }
+  log('playing in a YouTube window:', s.video_id);
+  $('#popup-note').text('Playing in a YouTube window. Close it when you\'re done and the next song starts.');
+  state.popup = {win: w, videoId: s.video_id};
+  clearInterval(state.popupTimer);
+  state.popupTimer = setInterval(() => {
+    if (!state.popup || !state.popup.win.closed) return;
+    const done = state.popup.videoId;
+    state.popup = null;
+    clearInterval(state.popupTimer);
+    if (cur() && cur().video_id === done) {
+      log('YouTube window closed → next song');
+      loadSong(state.i + 1, true, false);
+    }
+  }, 1000);
+}
+
+// Moving to another song closes the window, so two songs never play at once.
+function closePopup() {
+  if (state.popup && !state.popup.win.closed) state.popup.win.close();
+  state.popup = null;
+  clearInterval(state.popupTimer);
+}
+
+function showEmbedBlocked(code) {
+  $('#unavailable').removeClass('d-none').empty().append(
+    $('<div>').text(`YouTube won't play this one inside the page (error ${code}: age-restricted, or the uploader turned off embedding).`),
+    $('<div class="d-flex gap-2 align-items-center mt-2">').append(
+      $('<button class="btn btn-sm btn-light text-nowrap">').text('Play in a YouTube window').on('click', openPopup),
+      $('<span id="popup-note" class="small">')));
 }
 
 function poll() {
@@ -281,8 +329,13 @@ function onStateChange(e) {
 function onError(e) {
   const why = YT_ERRORS[e.data] || 'unknown';
   logError('YouTube error', e.data, why, cur() ? cur().video_id : '');
-  $('#unavailable').removeClass('d-none').text(`Unavailable (error ${e.data}: ${why}). Use Next to move on.`);
   save({error: String(e.data)});
+  if (EMBED_BLOCKED.includes(e.data)) {
+    showEmbedBlocked(e.data);
+    openPopup(); // may be blocked (not a click); the button is there for that
+    return;
+  }
+  $('#unavailable').removeClass('d-none').text(`Unavailable (error ${e.data}: ${why}). Use Next to move on.`);
 }
 
 window.onYouTubeIframeAPIReady = function () {
