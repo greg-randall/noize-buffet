@@ -52,6 +52,25 @@ function require_post(): array
 
 require_same_site();
 try {
+    nb_profiles_ensure_default();
+    // Stations: listing and making one need no station's database.
+    if (($_GET['action'] ?? '') === 'profiles') {
+        respond(['profiles' => nb_profiles(), 'default' => nb_profiles()[0]['slug'] ?? NB_DEFAULT_PROFILE]);
+    }
+    if (($_GET['action'] ?? '') === 'profile_create') {
+        $name = trim((string)(require_post()['name'] ?? ''));
+        $slug = nb_profile_create($name);
+        respond(['ok' => true, 'slug' => $slug, 'name' => nb_profile_name($slug)]);
+    }
+    // Every other request is for one station: ?profile=<slug> (this tab's station), else the first one.
+    $station = (string)($_GET['profile'] ?? '');
+    if ($station === '') {
+        $station = nb_profiles()[0]['slug'] ?? NB_DEFAULT_PROFILE;
+    }
+    if (!in_array($station, array_column(nb_profiles(), 'slug'), true)) {
+        respond(['ok' => false, 'error' => 'unknown station'], 404);
+    }
+    nb_profile($station);
     $pdo = nb_db();
     switch ($_GET['action'] ?? '') {
         case 'queue':

@@ -110,8 +110,9 @@
     </div>
 
     <div class="col-lg-4 col-xl-3" id="chat-col">
-      <div id="status-bar" class="d-flex justify-content-end gap-1 mb-2 flex-shrink-0">
-        <span id="conn-status" class="badge text-bg-danger d-none me-auto"></span>
+      <div id="status-bar" class="d-flex justify-content-end align-items-center gap-1 mb-2 flex-shrink-0">
+        <select id="station" class="form-select form-select-sm me-auto" aria-label="Station"></select>
+        <span id="conn-status" class="badge text-bg-danger d-none"></span>
         <span id="agent-status" class="badge d-none">agent working…</span>
         <span id="mining-status" class="badge text-bg-secondary d-none" role="button"></span>
         <span id="save-status" class="badge text-bg-secondary">idle</span>

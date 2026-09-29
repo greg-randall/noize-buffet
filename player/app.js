@@ -439,7 +439,64 @@ function pollMining() {
 
 // ---------- wiring ----------
 
-$(function () {
+// ---------- stations ----------
+// Each station is a separate listening profile (its own playlist, notes and chat). This tab's station is in the
+// address (#jazz) so tabs can differ, and is remembered for the next visit. Every API call carries it.
+
+const NEW_STATION = '__new__';
+const STATION_KEY = 'nb-station';
+let station = null;
+
+$.ajaxPrefilter(opts => {
+  if (station && opts.url.startsWith('api.php')) {
+    opts.url += (opts.url.includes('?') ? '&' : '?') + 'profile=' + encodeURIComponent(station);
+  }
+});
+
+function goToStation(slug) {
+  try { localStorage.setItem(STATION_KEY, slug); } catch (e) { /* not remembered */ }
+  history.replaceState(null, '', '#' + slug); // (setting location.hash first would make the reload below a no-op)
+  location.reload();
+}
+
+function fillStations(res) {
+  const $sel = $('#station').empty();
+  res.profiles.forEach(p => $sel.append($('<option>').val(p.slug).text(p.name)));
+  $sel.append($('<option>').val(NEW_STATION).text('+ New station…'));
+  $sel.val(station);
+  $sel.on('change', function () {
+    if (this.value !== NEW_STATION) {
+      log('station:', this.value);
+      goToStation(this.value);
+      return;
+    }
+    const name = (window.prompt('Name for the new station (for example Jazz or Late night ambient):') || '').trim();
+    $sel.val(station); // back to where we are, unless it worked
+    if (!name) return;
+    $.ajax({url: 'api.php?action=profile_create', method: 'POST', contentType: 'application/json', data: JSON.stringify({name})})
+      .done(made => { log('new station:', made.slug); goToStation(made.slug); })
+      .fail(xhr => window.alert((xhr.responseJSON && xhr.responseJSON.error) || 'Could not make the station.'));
+  });
+}
+
+// Find out which stations there are and which one this tab is on, then start.
+function chooseStation() {
+  $.getJSON('api.php', {action: 'profiles'}).done(res => {
+    const known = res.profiles.map(p => p.slug);
+    let remembered = null;
+    try { remembered = localStorage.getItem(STATION_KEY); } catch (e) { /* storage blocked */ }
+    const wanted = [decodeURIComponent(location.hash.replace(/^#/, '')), remembered, res.default];
+    station = wanted.find(s => s && known.includes(s)) || known[0] || res.default;
+    fillStations(res);
+    const name = (res.profiles.find(p => p.slug === station) || {}).name || station;
+    document.title = `${name} · noize-buffet`;
+    startApp();
+  }).fail(xhr => connError('listing stations', xhr));
+}
+
+$(chooseStation);
+
+function startApp() {
   debug('page loaded; state is window.nb');
   $.ajax({url: 'api.php?action=start', method: 'POST', contentType: 'application/json', data: '{}'})
     .done(res => { if (res.started) log('first run: interview queued'); })
@@ -514,6 +571,7 @@ $(function () {
 
   window.addEventListener('beforeunload', () => {
     if (!cur() || !state.played) return;
-    navigator.sendBeacon('api.php?action=save', new Blob([JSON.stringify(payload())], {type: 'application/json'}));
+    navigator.sendBeacon('api.php?action=save&profile=' + encodeURIComponent(station),
+      new Blob([JSON.stringify(payload())], {type: 'application/json'}));
   });
-});
+}
