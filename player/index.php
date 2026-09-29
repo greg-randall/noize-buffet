@@ -106,15 +106,14 @@
     </div>
 
     <div class="col-lg-4 col-xl-3" id="chat-col">
-      <div id="chat-box" class="position-relative mb-2">
+      <div id="status-bar" class="d-flex flex-wrap justify-content-end gap-1 mb-2 flex-shrink-0">
+        <span id="conn-status" class="badge text-bg-danger d-none me-auto"></span>
+        <span id="agent-status" class="badge d-none">agent working…</span>
+        <span id="mining-status" class="badge text-bg-secondary d-none" role="button"></span>
+        <span id="save-status" class="badge text-bg-secondary">idle</span>
+      </div>
+      <div id="chat-box" class="mb-2">
         <div id="chat-log" class="border rounded p-2 bg-body-secondary"></div>
-        <!-- Status floats faintly over the chat's top-right corner; hover to read it. Connection errors stay solid. -->
-        <div id="status-overlay">
-          <span id="agent-status" class="badge text-bg-info d-none">agent working…</span>
-          <span id="mining-status" class="badge text-bg-secondary d-none" role="button"></span>
-          <span id="save-status" class="badge text-bg-secondary">idle</span>
-        </div>
-        <span id="conn-status" class="badge text-bg-danger d-none"></span>
       </div>
       <form id="chat-form" class="d-flex gap-2 flex-shrink-0">
         <textarea id="chat-input" class="form-control" rows="4" placeholder="What do you think of this song? Or ask for anything…"></textarea>

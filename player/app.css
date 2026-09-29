@@ -1,5 +1,32 @@
 /* noize-buffet page styles (loaded by index.php). */
 
+/* Accent colours, sampled from a runway outfit: vermilion trousers, oxblood coat, terracotta shirt. They replace
+   Bootstrap's blue as the page's primary colour (Send, links, tabs, your chat bubbles, "agent working"). */
+:root, [data-bs-theme=dark] {
+  --nb-vermilion: #c4432b;
+  --nb-vermilion-hover: #d6583f;
+  --nb-oxblood: #5c1b25;
+  --nb-terracotta: #c27250;
+  --bs-primary: var(--nb-vermilion);
+  --bs-primary-rgb: 196, 67, 43;
+  --bs-primary-bg-subtle: #3a1318;
+  --bs-primary-border-subtle: #6e2530;
+  --bs-primary-text-emphasis: #e7a68f;
+  --bs-link-color: var(--nb-terracotta);
+  --bs-link-color-rgb: 194, 114, 80;
+  --bs-link-hover-color: #dc9474;
+  --bs-link-hover-color-rgb: 220, 148, 116;
+  --bs-focus-ring-color: rgba(196, 67, 43, .35);
+}
+.btn-primary {
+  --bs-btn-bg: var(--nb-vermilion); --bs-btn-border-color: var(--nb-vermilion);
+  --bs-btn-hover-bg: var(--nb-vermilion-hover); --bs-btn-hover-border-color: var(--nb-vermilion-hover);
+  --bs-btn-active-bg: #a83722; --bs-btn-active-border-color: #a83722;
+  --bs-btn-disabled-bg: var(--nb-vermilion); --bs-btn-disabled-border-color: var(--nb-vermilion);
+}
+.form-control:focus { border-color: var(--nb-terracotta); box-shadow: 0 0 0 .2rem var(--bs-focus-ring-color); }
+#agent-status { background: var(--nb-terracotta); color: #1c0f0b; }
+
 /* App layout on wide screens: the page never scrolls; the playlist, mining table,
    debug log and chat each scroll inside their own box. Narrow screens stack everything and scroll normally. */
 @media (min-width: 992px) {
@@ -40,12 +67,8 @@
     /* wide: a dark, blurry halo well out from the letters */
     -16px 0 28px #000, 16px 0 28px #000, 0 -16px 28px #000, 0 16px 28px #000,
     -12px -12px 28px #000, 12px -12px 28px #000, -12px 12px 28px #000, 12px 12px 28px #000; }
-#status-overlay { position: absolute; top: .45rem; right: 1.4rem; left: .6rem; z-index: 2; display: flex; gap: .3rem;
-  flex-wrap: wrap; justify-content: flex-end; opacity: .45; transition: opacity .15s; pointer-events: none; }
-#status-overlay > * { pointer-events: auto; white-space: nowrap; }
-#status-overlay:hover { opacity: 1; }
-#conn-status { position: absolute; bottom: .6rem; left: .6rem; right: 1.4rem; z-index: 2; white-space: normal;
-  text-align: left; }
+#status-bar .badge { white-space: nowrap; }
+#conn-status { white-space: normal; text-align: left; }
 #player-wrap iframe, #player { width: 100%; height: 100%; }
 #queue-list tr { cursor: pointer; }
 #queue-list td.num { width: 2.5rem; }

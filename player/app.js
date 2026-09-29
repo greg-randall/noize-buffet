@@ -370,7 +370,7 @@ function pollChat() {
   });
 }
 
-// "agent working… 0:47" over the chat's corner, and a temporary bubble at the bottom of the chat saying what the agent is
+// "agent working… 0:47" above the chat, and a temporary bubble at the bottom of the chat saying what the agent is
 // doing right now ("Searching YouTube (12 songs)… 0:47"), so a long batch visibly isn't stuck.
 function renderAgentStatus() {
   const j = state.jobs;
@@ -400,7 +400,7 @@ function renderAgentStatus() {
 
 // ---------- comment mining ----------
 
-// The "Comment mining" tab, and "mining 1 running, 3 queued" over the chat's corner.
+// The "Comment mining" tab, and "mining 1 running, 3 queued" above the chat.
 function renderMining(res) {
   const vids = res.videos;
   const active = vids.filter(v => ['downloading', 'filtering', 'extracting'].includes(v.status)).length;
@@ -476,11 +476,6 @@ $(function () {
     log('opened on YouTube:', cur() ? cur().video_id : '');
     $('#blocked-note').text('Playing on YouTube. Press Next here when you\'re done.');
   });
-  // The chat starts below the floating status badges, however many lines they wrap to.
-  const overlay = document.getElementById('status-overlay');
-  new ResizeObserver(() => {
-    document.getElementById('chat-log').style.setProperty('padding-top', (overlay.offsetHeight + 12) + 'px', 'important');
-  }).observe(overlay);
 
   $('#chat-form').on('submit', function (e) {
     e.preventDefault();
