@@ -51,7 +51,7 @@ Open the address it prints (usually http://localhost:8000). It asks you a few qu
 
 ### Picking songs
 
-1. **The interview.** The first time, Claude asks what you're hoping to find, a few songs you love and why, and anything you don't want. It checks the songs you named on YouTube and asks about anything unclear. It writes your goal, in your words, to `brief.md`, and its notes on your taste to `taste.md`.
+1. **The interview.** The first time, Claude asks what you're hoping to find, a few songs you love and why, and anything you don't want. It checks the songs you named on YouTube and asks about anything unclear. It writes your goal, in your words, to `brief.md`, and its notes on your taste to `taste.md` (in your station's folder, `profiles/main/`).
 2. **Research.** Before each batch, Claude looks into the songs you like: their record labels and the other artists on them, the producers and collaborators, "similar artist" pages on music sites, and the scenes around them. One person's recommendation isn't enough on its own; it needs a second, independent sign.
 3. **The batch.** It adds about 12 songs: mostly close to what you like, some from the artists and labels it turned up, one **sideways** pick from somewhere a "similar artists" page would never lead (a stranger's Spotify playlist, a DJ's set list, what else someone who bought a record you love bought, or a well-liked tip from one YouTube commenter about a little-known artist), and one wildcard to test the edges of your taste. Each song records why it was picked and the page that led to it, which you can see in the playlist.
 4. **Listening.** For each song, the page records how far you got, your rating (top, yes, good, ok, meh, no), whether it was new to you, and whether it's good but not what you're after.
@@ -79,6 +79,12 @@ It can read and change files in the noize-buffet folder, and nothing outside it.
 On one measured run, chat replies took about 8 seconds and a first batch with research about 4 minutes. With a subscription, jobs count toward your plan's usage limits, which you share with your own Claude use; a researched batch uses about as much as 20 chat replies. With an API key you pay per job: about $0.05 per chat reply and $1 per batch. Reading one song's comments took about 7 minutes and $0.12 of Claude usage, plus about $0.09 of TypeSafe (about 3 cents per 1,000 comments).
 
 If your Claude usage runs out, the chat says so. Until it resets, comment reading and automatic refills wait, and nothing is lost.
+
+### Stations
+
+Each station is its own playlist with its own brief, taste notes, chat and ratings, kept in `profiles/<name>/`. Pick one from the Station menu above the chat, or choose **+ New station...** to start another (say, one for focus music and one for late-night jazz). Comments already downloaded are shared between stations, so reading the same song twice isn't paid for twice, and `config.json` applies to all of them. The Claude usage limit is per account, so all stations pause together.
+
+If you used noize-buffet before stations existed, run `./migrate.sh` once: it moves your old `data/`, `brief.md`, `taste.md` and `handoff.md` into `profiles/main/`, after keeping a copy in `backup-before-stations/`. `start.py` reminds you if you forget.
 
 ### Other ways to start
 

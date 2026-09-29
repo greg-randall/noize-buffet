@@ -27,7 +27,7 @@ DEFAULT_PORT = 8000
 FALLBACK_PORTS = range(8001, 9000)
 FALLBACK_TRIES = 25
 # What --reset deletes: everything a run creates. .env and config.json are kept.
-RESET_PATHS = ["data", "brief.md", "taste.md", "handoff.md", "comments"]
+RESET_PATHS = ["profiles", "data", "brief.md", "taste.md", "handoff.md", "comments"]
 
 
 def report(ok, name, fix=""):
@@ -353,7 +353,9 @@ def main():
     if not check_requirements(need_typesafe=not args.no_typesafe):
         sys.exit(1)
     check_env(args.no_typesafe)
-    (ROOT / "data").mkdir(exist_ok=True)
+    if (ROOT / "data" / "music.sqlite").exists() and not args.reset:
+        sys.exit("\nYour data is from before stations. Run ./migrate.sh once to move it into profiles/main/, then start again.")
+    (ROOT / "profiles").mkdir(exist_ok=True)
     if not args.reset:  # --reset has already stopped them
         stop_leftovers("Before starting")
     port = choose_port()

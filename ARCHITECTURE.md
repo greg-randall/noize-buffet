@@ -12,11 +12,11 @@ How noize-buffet is built, for anyone changing it or debugging it. [README.md](R
 | `[agent]` | `php scripts/job_worker.php` | runs agent jobs one at a time |
 | `[mine]` | `php scripts/mine_worker.php` | mines queued videos' comments, `mining_workers` at a time |
 
-Ctrl+C sends SIGTERM to each group. `start.py --reset` finds this folder's leftover processes through `/proc` (the web server, the workers, `claude -p` processes, anything under `scripts/` or `mining/`, and `yt-dlp`), stops them, and deletes `data/`, `comments/`, `brief.md`, `taste.md` and `handoff.md` after a typed `RESET`.
+Ctrl+C sends SIGTERM to each group. `start.py --reset` finds this folder's leftover processes through `/proc` (the web server, the workers, `claude -p` processes, anything under `scripts/` or `mining/`, and `yt-dlp`), stops them, and deletes `profiles/`, `comments/` and any old-style `data/`, `brief.md`, `taste.md` and `handoff.md` after a typed `RESET`.
 
 ## Database
 
-One SQLite file, `data/music.sqlite` (`NB_DB` overrides it; the tests use this). Every access goes through `nb_locked()` in `lib/db.php`, an `flock()` on `<db>.lock`: SQLite's own locking relies on POSIX locks, which fail on WSL's 9p mount of a Windows drive ("database is locked"). `nb_write()` wraps a write in `BEGIN IMMEDIATE`; a write inside a write joins it.
+One SQLite file per station, `profiles/<station>/music.sqlite` (`NB_DB` overrides it; the tests use this). Every access goes through `nb_locked()` in `lib/db.php`, an `flock()` on `<db>.lock`: SQLite's own locking relies on POSIX locks, which fail on WSL's 9p mount of a Windows drive ("database is locked"). `nb_write()` wraps a write in `BEGIN IMMEDIATE`; a write inside a write joins it.
 
 | Table | Holds |
 |---|---|
@@ -47,9 +47,9 @@ Its command line (`nb_parent_command()`):
 - `--settings` with `nb_parent_settings()`: `claudeMdExcludes` for every instruction file above the repo, in the user's `~/.claude`, and under `comments/` (so a mined video's `CLAUDE.md` never reaches it); hooks and auto memory off; and `permissions.deny` for reading or editing `.env` (and `NB_ENV_FILE`), since the agent reads comments written by strangers and can fetch web pages.
 - `--disable-slash-commands`.
 
-Tool calls stream into the `settings` table as the agent's current activity ("Searching YouTube (12 songs)"), which the page shows. Refused tools are posted to the chat. Each job writes `data/jobs/<id>.json`: prompt, process, duration, denials, every event, and the path to Claude Code's transcript.
+Tool calls stream into the `settings` table as the agent's current activity ("Searching YouTube (12 songs)"), which the page shows. Refused tools are posted to the chat. Each job writes `profiles/<station>/jobs/<id>.json`: prompt, process, duration, denials, every event, and the path to Claude Code's transcript.
 
-The agent's only commands are `bin/nb.php` (JSON in and out, every call logged to `data/nb.log`), `scripts/yt_search.py` (yt-dlp search, several queries per call, with each video's view count) and `scripts/spotify_playlist.py` (reads public Spotify playlists from the embeddable player page, `open.spotify.com/embed/playlist/<id>`, whose page data carries the first 100 tracks; no account or key; one playlist a second; `--seed` checks a song is still on it):
+The agent's only commands are `bin/nb.php` (JSON in and out, every call logged to the station's `nb.log`), `scripts/yt_search.py` (yt-dlp search, several queries per call, with each video's view count) and `scripts/spotify_playlist.py` (reads public Spotify playlists from the embeddable player page, `open.spotify.com/embed/playlist/<id>`, whose page data carries the first 100 tracks; no account or key; one playlist a second; `--seed` checks a song is still on it):
 
 | `nb.php` | Does |
 |---|---|
@@ -155,7 +155,7 @@ Around each run, the runner:
 |---|---|
 | `start.py` | requirement checks, the three processes, `--reset` |
 | `CLAUDE.md` | the agent's rulebook |
-| `brief.md`, `taste.md`, `handoff.md` | the user's goal, the agent's notes, and its note to its next conversation (never committed) |
+| `profiles/<station>/{brief,taste,handoff}.md` | the user's goal, the agent's notes, and its note to its next conversation (never committed) |
 | `bin/nb.php` | the agent's database commands |
 | `lib/db.php` | database, locking, songs, listens, jobs, mining queue, leads, usage pause |
 | `lib/parent.php`, `lib/parent_process.php` | the agent's command, prompts, job runner, process |
@@ -168,7 +168,7 @@ Around each run, the runner:
 | `scripts/check_confinement.php` | the real confinement check |
 | `mining/` | filters, `prepare.py`, `coverage.py`, `merge_leads.py`, `mentions.py` (shared parsing), `child_CLAUDE.md`, `typesafe_experiment.py` |
 | `player/` | the page (`index.php`), its styles (`app.css`) and script (`app.js`), and the API (`api.php`) |
-| `data/` | database, `jobs/<id>.json`, `nb.log`, `parent-stderr.log`, `api-errors.log` (never committed) |
+| `profiles/<station>/` | `music.sqlite`, `profile.json` (display name), `jobs/<id>.json`, `nb.log`, `parent-stderr.log`, `api-errors.log` (never committed) |
 | `comments/<video_id>/` | one mined video's files, described above (never committed) |
 | `tests/` | the tests, their stand-ins and fixtures |
 
@@ -180,8 +180,8 @@ Runs every `tests/test_*.php` and `tests/test_*.py`. They use stand-ins, so they
 
 ## When something goes wrong
 
-- **The agent:** the `[agent]` lines show each tool call as it happens, then a line per job with status, time, turns, cost at API prices and whether the process was reused, then any `BLOCKED:` tools and the job's debug file. `data/jobs/<id>.json` has everything about one job; `data/nb.log` every database command with its input and output; `data/parent-stderr.log` anything `claude` printed to stderr.
-- **The page:** `data/api-errors.log` has server errors with stack traces. The page's Debug tab (next to the playlist) logs what happens (songs, ratings, chat, the agent, errors), and so does the browser console with an `[nb]` prefix. The tab's "Show detail" switch, or `nb.verbose(true)` in the console, adds every save, player state and load (remembered in that browser); `nb` in the console shows the page's state. Type `[nb]` in the console's filter box to hide YouTube's own warnings.
+- **The agent:** the `[agent]` lines show each tool call as it happens, then a line per job with status, time, turns, cost at API prices and whether the process was reused, then any `BLOCKED:` tools and the job's debug file. `jobs/<id>.json` in the station's folder has everything about one job; `nb.log` every database command with its input and output; `parent-stderr.log` anything `claude` printed to stderr.
+- **The page:** `api-errors.log` (in the station's folder) has server errors with stack traces. The page's Debug tab (next to the playlist) logs what happens (songs, ratings, chat, the agent, errors), and so does the browser console with an `[nb]` prefix. The tab's "Show detail" switch, or `nb.verbose(true)` in the console, adds every save, player state and load (remembered in that browser); `nb` in the console shows the page's state. Type `[nb]` in the console's filter box to hide YouTube's own warnings.
 - **Mining:** the `[mine]` lines show each video's steps. For one video, `comments/<video_id>/mine.log` has everything yt-dlp, the filter and the children printed; `children.jsonl` each child's result; `coverage.json` which comments got no line. The panel's Problems column shows the row's error, and Notes what the filter skipped.
 - **Every Haiku child fails at start-up** and `mine.log` mentions MCP or a managed policy: a managed `managed-mcp.json` makes `--strict-mcp-config` exit at once. Remove that flag from `nb_child_command()`.
 - **Mining never starts:** check the status badges above the chat for "mining paused … (out of Claude usage)".
