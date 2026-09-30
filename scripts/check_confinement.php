@@ -17,7 +17,7 @@ declare(strict_types=1);
 // PASS needs 1-3 and 5 (with at least one permission mode). Out of Claude usage: INCONCLUSIVE, exit 2.
 // Everything is under data/confinement-check/ (git-ignored).
 require dirname(__DIR__) . '/lib/db.php';
-require dirname(__DIR__) . '/lib/config.php';
+require_once dirname(__DIR__) . '/lib/config.php';
 require dirname(__DIR__) . '/lib/mining.php';
 
 $config = nb_config();

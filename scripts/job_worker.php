@@ -2,7 +2,7 @@
 declare(strict_types=1);
 // Runs parent jobs one at a time. Usage: php scripts/job_worker.php [--once]
 require dirname(__DIR__) . '/lib/db.php';
-require dirname(__DIR__) . '/lib/config.php';
+require_once dirname(__DIR__) . '/lib/config.php';
 require dirname(__DIR__) . '/lib/parent.php';
 
 $once = in_array('--once', $argv, true);

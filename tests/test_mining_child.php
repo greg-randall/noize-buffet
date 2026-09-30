@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 require __DIR__ . '/../lib/db.php';
-require __DIR__ . '/../lib/config.php';
+require_once __DIR__ . '/../lib/config.php';
 require __DIR__ . '/../lib/mining.php';
 require __DIR__ . '/assert.php';
 
@@ -1255,7 +1255,7 @@ check((hrtime(true) - $t) / 1e9 < 10 && $r['ok'] === false && scandir("$dir/chil
 foreach (['children.jsonl', 'mine.log'] as $logName) {
     $dir = $tamperDirAll('safe_append_fifo_' . preg_replace('/\W/', '_', $logName));
     if (function_exists('posix_mkfifo') && @posix_mkfifo("$dir/$logName", 0644)) {
-        $code = 'require ' . var_export(nb_root() . '/lib/db.php', true) . '; require ' . var_export(nb_root() . '/lib/config.php', true)
+        $code = 'require ' . var_export(nb_root() . '/lib/db.php', true) . '; require_once ' . var_export(nb_root() . '/lib/config.php', true)
             . '; require ' . var_export(nb_root() . '/lib/mining.php', true) . '; echo json_encode(nb_run_child("chunk-01.md", $argv[1], json_decode($argv[2], true)));';
         $t = hrtime(true);
         $out = shell_exec('timeout 20 ' . escapeshellarg(PHP_BINARY) . ' -r ' . escapeshellarg($code) . ' ' . escapeshellarg($dir) . ' ' . escapeshellarg(json_encode($config)) . ' 2>&1');

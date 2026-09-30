@@ -4,7 +4,7 @@ declare(strict_types=1);
 // --once: mine everything queued, then exit (for tests). Each video runs as scripts/mine_video.php, with NB_PROFILE set
 // to the station it is for.
 require dirname(__DIR__) . '/lib/db.php';
-require dirname(__DIR__) . '/lib/config.php';
+require_once dirname(__DIR__) . '/lib/config.php';
 
 $once = in_array('--once', $argv, true);
 $config = nb_config();

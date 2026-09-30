@@ -135,6 +135,7 @@ Around each run, the runner:
 | `parent_model` | `sonnet` | the agent's Claude model |
 | `session_rotate_turns` | 40 | jobs before the agent's conversation starts over |
 | `job_timeout_s` | 600 | give up on a job (and restart the agent) after this long |
+| `max_per_artist` | 2 | most songs by one artist in a batch (`add-batch` returns the extras as `over_limit`; songs the user named don't count); the songs added are spread so an artist doesn't play twice in a row |
 | `memory_picks` | 2 | most songs per batch picked from memory rather than research |
 | `refill_when_left` | 5 | queue a batch automatically at this many unplayed songs; 0 turns it off |
 | `mining_workers` | 2 | videos mined at once |

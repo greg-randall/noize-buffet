@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/profiles.php';
+require_once __DIR__ . '/config.php';
 
 const NB_RATINGS = ['top', 'yes', 'good', 'ok', 'meh', 'no'];
 const NB_BUCKETS = ['close', 'lead', 'sideways', 'wildcard', 'user'];
@@ -195,9 +196,19 @@ function nb_write(PDO $pdo, callable $fn): mixed
 
 // ---------- songs and batches ----------
 
+/** Grouping key for a song's main artist: "Ken Carson ft. HXG" and "Ken Carson, Destroy Lonely" are both Ken Carson. */
+function nb_primary_artist_key(string $artist): string
+{
+    $first = preg_split('/\s*(?:,|;|&|\+|\bfeat\.?|\bft\.?|\bfeaturing\b|\bwith\b|\bx\b|\bvs\.?)\s*/iu', $artist, 2)[0] ?? $artist;
+    return nb_name_key($first);
+}
+
 /**
  * Add a batch of songs. Each song needs an 11-char video_id, a title and a bucket.
- * Returns batch_id (null if nothing was added), added ids, duplicate ids and invalid entries.
+ * At most config max_per_artist songs by one artist go in (bucket "user" songs don't count); the rest come back as
+ * `over_limit`, for the agent to replace with other artists. The songs that are added are spread out so the same
+ * artist never plays twice in a row when there is a choice.
+ * Returns batch_id (null if nothing was added), added ids, duplicate ids, invalid entries and over_limit entries.
  */
 function nb_add_batch(PDO $pdo, array $songs, string $summary, ?int $jobId): array
 {
@@ -205,12 +216,16 @@ function nb_add_batch(PDO $pdo, array $songs, string $summary, ?int $jobId): arr
         $added = [];
         $duplicates = [];
         $invalid = [];
+        $overLimit = [];
         $now = nb_now();
+        $cap = (int)(nb_config()['max_per_artist'] ?? 0);
         $pdo->prepare('INSERT INTO batches (created_at, job_id, summary) VALUES (?, ?, ?)')->execute([$now, $jobId, $summary]);
         $batchId = (int)$pdo->lastInsertId();
         $exists = $pdo->prepare('SELECT COUNT(*) FROM songs WHERE video_id = ?');
         $insert = $pdo->prepare('INSERT INTO songs (video_id, artist, title, channel, duration_s, added_at, batch_id, bucket, reason, source)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $take = []; // [artist key, song] in the order given, before spreading out
+        $perArtist = [];
         foreach ($songs as $i => $s) {
             $vid = is_array($s) ? (string)($s['video_id'] ?? '') : '';
             $bucket = is_array($s) ? (string)($s['bucket'] ?? '') : '';
@@ -227,22 +242,66 @@ function nb_add_batch(PDO $pdo, array $songs, string $summary, ?int $jobId): arr
                 $duplicates[] = $vid;
                 continue;
             }
-            $insert->execute([
-                $vid, (string)($s['artist'] ?? ''), $title, (string)($s['channel'] ?? ''),
-                isset($s['duration_s']) && (float)$s['duration_s'] > 0 ? (float)$s['duration_s'] : null,
-                $now, $batchId, $bucket, (string)($s['reason'] ?? ''), (string)($s['source'] ?? ''),
-            ]);
+            $key = nb_primary_artist_key((string)($s['artist'] ?? ''));
+            if ($key !== '' && $bucket !== 'user') {
+                $perArtist[$key] = ($perArtist[$key] ?? 0) + 1;
+                if ($cap > 0 && $perArtist[$key] > $cap) {
+                    $overLimit[] = ['video_id' => $vid, 'artist' => (string)($s['artist'] ?? ''),
+                        'why' => "already $cap songs by this artist in the batch; pick another artist instead"];
+                    continue;
+                }
+            }
+            $take[] = [$key, $s + ['video_id' => $vid, 'title' => $title, 'bucket' => $bucket]];
             $added[] = $vid;
-            if ($bucket === 'user') {
-                nb_mining_enqueue($pdo, $vid); // a song they named: mine its comments for leads
+        }
+        $added = [];
+        foreach (nb_spread_by_artist($take) as $s) {
+            $insert->execute([
+                $s['video_id'], (string)($s['artist'] ?? ''), $s['title'], (string)($s['channel'] ?? ''),
+                isset($s['duration_s']) && (float)$s['duration_s'] > 0 ? (float)$s['duration_s'] : null,
+                $now, $batchId, $s['bucket'], (string)($s['reason'] ?? ''), (string)($s['source'] ?? ''),
+            ]);
+            $added[] = $s['video_id'];
+            if ($s['bucket'] === 'user') {
+                nb_mining_enqueue($pdo, $s['video_id']); // a song they named: mine its comments for leads
             }
         }
         if ($added === []) {
             $pdo->prepare('DELETE FROM batches WHERE id = ?')->execute([$batchId]);
             $batchId = null;
         }
-        return ['batch_id' => $batchId, 'added' => $added, 'duplicates' => $duplicates, 'invalid' => $invalid];
+        return ['batch_id' => $batchId, 'added' => $added, 'duplicates' => $duplicates, 'invalid' => $invalid,
+            'over_limit' => $overLimit];
     });
+}
+
+/**
+ * [[artist key, song], ...] -> songs, so the same artist isn't next to itself: repeatedly take from the artist that
+ * has the most left (first come first, on a tie), skipping the one just played unless it is the only one left.
+ */
+function nb_spread_by_artist(array $take): array
+{
+    $groups = [];
+    foreach ($take as $n => [$key, $song]) {
+        $groups[$key !== '' ? $key : "\0$n"][] = $song; // songs with no artist never group
+    }
+    $out = [];
+    $last = null;
+    while ($groups) {
+        $best = null;
+        foreach ($groups as $key => $list) {
+            if ($key !== $last && ($best === null || count($list) > count($groups[$best]))) {
+                $best = $key;
+            }
+        }
+        $best ??= $last;
+        $out[] = array_shift($groups[$best]);
+        if ($groups[$best] === []) {
+            unset($groups[$best]);
+        }
+        $last = $best;
+    }
+    return $out;
 }
 
 /** Every song in the order it was added, with its listen data and batch summary. */

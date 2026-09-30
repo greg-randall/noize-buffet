@@ -7,6 +7,28 @@ $pdo = fresh_db('test_db');
 $A = 'AAAAAAAAAAA';
 $B = 'BBBBBBBBBBB';
 
+echo "one artist can't fill a batch\n";
+check(nb_primary_artist_key('Ken Carson ft. HXG') === nb_primary_artist_key('Ken Carson, Destroy Lonely')
+    && nb_primary_artist_key('Ken Carson') === nb_primary_artist_key('KEN CARSON'), 'features and case don\'t make a new artist');
+check(nb_primary_artist_key('Simon & Garfunkel') === nb_primary_artist_key('Simon'), 'the first name is the main artist');
+$song = fn(string $id, string $artist, string $bucket = 'close') => ['video_id' => $id, 'artist' => $artist, 'title' => "T $id", 'bucket' => $bucket];
+$r = nb_add_batch($pdo, [
+    $song('KCARSON0001', 'Ken Carson'), $song('KCARSON0002', 'Ken Carson'), $song('KCARSON0003', 'Ken Carson ft. HXG'),
+    $song('KCARSON0004', 'Ken Carson, Destroy Lonely'), $song('OTHERART001', 'Someone Else'), $song('KCARSON0005', 'Ken Carson', 'user'),
+], 'capped', null);
+check(count($r['over_limit']) === 2 && array_column($r['over_limit'], 'video_id') === ['KCARSON0003', 'KCARSON0004'],
+    'the third and fourth Ken Carson are handed back as over_limit');
+check(str_contains($r['over_limit'][0]['why'], 'another artist'), 'and say why');
+check(in_array('KCARSON0005', $r['added'], true), 'a song the user named is exempt');
+check(count($r['added']) === 4, 'the rest went in');
+$order = $r['added'];
+check($order[0] === 'KCARSON0001' && $order[1] === 'OTHERART001', 'the same artist is spread out, not back to back');
+$r = nb_add_batch($pdo, [$song('SPREAD00001', 'Aaa'), $song('SPREAD00002', 'Aaa'), $song('SPREAD00003', 'Bbb'), $song('SPREAD00004', 'Bbb')], 's', null);
+$artists = array_map(fn($v) => substr($v, -1) <= '2' ? 'a' : 'b', $r['added']);
+check($artists === ['a', 'b', 'a', 'b'] || $artists === ['b', 'a', 'b', 'a'], 'two artists twice each alternate');
+$pdo->exec("DELETE FROM songs WHERE video_id LIKE 'KCARSON%' OR video_id LIKE 'OTHERART%' OR video_id LIKE 'SPREAD%'");
+$pdo->exec('DELETE FROM batches WHERE id NOT IN (SELECT batch_id FROM songs)');
+
 echo "batches\n";
 $r = nb_add_batch($pdo, [
     ['video_id' => $A, 'artist' => 'Art A', 'title' => 'Song A', 'duration_s' => 200, 'bucket' => 'close', 'reason' => 'r', 'source' => 's'],

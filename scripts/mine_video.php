@@ -5,7 +5,7 @@ declare(strict_types=1);
 // Out of Claude usage: the video goes back to queued and the script exits 75; nothing runs until the reset.
 // Subprocess output goes to comments/<video_id>/mine.log; this prints one progress line per step.
 require dirname(__DIR__) . '/lib/db.php';
-require dirname(__DIR__) . '/lib/config.php';
+require_once dirname(__DIR__) . '/lib/config.php';
 require dirname(__DIR__) . '/lib/mining.php';
 
 $vid = $argv[1] ?? '';
