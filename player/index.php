@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="app.css?v=<?= filemtime(__DIR__ . '/app.css') ?>">
 </head>
 <body>
+<a class="visually-hidden-focusable" href="#station">Skip to station</a>
 <main id="app" class="container-fluid py-3">
   <div class="row g-4">
     <div class="col-lg-8 col-xl-9" id="left-col">
@@ -110,13 +111,14 @@
     </div>
 
     <div class="col-lg-4 col-xl-3" id="chat-col">
-      <div id="status-bar" class="d-flex justify-content-end align-items-center gap-1 mb-2 flex-shrink-0">
+      <section id="status-bar" class="d-flex justify-content-end align-items-center gap-1 mb-2 flex-shrink-0" aria-labelledby="station-heading">
+        <h2 id="station-heading" class="visually-hidden">Station</h2>
         <select id="station" class="form-select form-select-sm me-auto" aria-label="Station"></select>
         <span id="conn-status" class="badge text-bg-danger d-none"></span>
         <span id="agent-status" class="badge d-none">agent working…</span>
         <span id="mining-status" class="badge text-bg-secondary d-none" role="button"></span>
         <span id="save-status" class="badge text-bg-secondary">idle</span>
-      </div>
+      </section>
       <div id="chat-box" class="mb-2">
         <div id="chat-log" class="border rounded p-2 bg-body-secondary"></div>
       </div>
