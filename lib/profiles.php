@@ -93,10 +93,13 @@ function nb_profile_create(string $name): string
     if ($name === '' || mb_strlen($name) > 60 || !nb_profile_valid($slug)) {
         throw new InvalidArgumentException('give the station a name of up to 60 letters or digits');
     }
-    if (is_dir(nb_profile_dir($slug))) {
-        throw new InvalidArgumentException("there is already a station called \"" . nb_profile_name($slug) . '"');
+    // mkdir is the atomic check: of two processes creating the same station at once, only one gets to make the folder.
+    if (!@mkdir(nb_profile_dir($slug), 0777, true)) {
+        if (is_dir(nb_profile_dir($slug))) {
+            throw new InvalidArgumentException("there is already a station called \"" . nb_profile_name($slug) . '"');
+        }
+        throw new RuntimeException('could not create the station folder ' . nb_profile_dir($slug));
     }
-    mkdir(nb_profile_dir($slug), 0777, true);
     file_put_contents(nb_profile_dir($slug) . '/profile.json', json_encode(['name' => $name], JSON_UNESCAPED_UNICODE));
     nb_db(nb_profile_dir($slug) . '/music.sqlite'); // makes the database and its tables
     return $slug;
@@ -117,5 +120,12 @@ function nb_profiles_ensure_default(): void
     if (getenv('NB_DB') || nb_profiles() !== [] || is_file(nb_legacy_db_path())) {
         return;
     }
-    nb_profile_create('Main');
+    try {
+        nb_profile_create('Main');
+    } catch (InvalidArgumentException $e) {
+        // The web API and the workers all start together on a fresh install; another one made "main" first.
+        if (!is_dir(nb_profile_dir(nb_profile_slug('Main')))) {
+            throw $e;
+        }
+    }
 }
